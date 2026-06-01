@@ -152,5 +152,27 @@ class Template:
         cls = self.get_schema_class()
         return cls.model_json_schema()
 
+    def render(self, model: BaseModel) -> str:
+        """
+        Render this template with a validated model.
+
+        Args:
+            model: A validated Pydantic model instance.
+
+        Returns:
+            The rendered artifact text.
+
+        Raises:
+            RenderError: If rendering fails (undefined variable, missing template).
+        """
+        from templateer.renderer import render_template
+
+        template_file = self.resolve_path(self.metadata.renderer.file)
+        return render_template(
+            template_file,
+            model,
+            strict=self.metadata.strict_context,
+        )
+
     def __repr__(self) -> str:
         return f"Template(name={self.name!r}, root={self.root!r})"
