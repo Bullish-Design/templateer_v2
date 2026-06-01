@@ -1,0 +1,6 @@
+-- allium: 3
+-- Templateer V2 specification index.
+-- Templateer: typed, constrained artifact generation for AI agents.
+
+use "./templates.allium" as templates
+use "./generation.allium" as generation

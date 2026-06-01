@@ -1,0 +1,114 @@
+-- allium: 3
+-- templates.allium
+-- Template definitions for Templateer V2.
+--
+-- A template is a named capability that can generate a specific kind
+-- of artifact. Templates are loaded from the filesystem by directory,
+-- where the directory name serves as the template identity.
+--
+-- Scope: Template definitions, catalog, and the Template Catalogue
+-- surface for browsing available templates.
+
+-- ============================================================================
+-- Entities
+-- ============================================================================
+
+entity Template {
+    name: String
+    -- The directory name that identifies this template.
+    -- Examples: "pyproject-uv", "github-actions-ci", "dockerfile-basic".
+    -- This is the sole matching key: a template is found by its name.
+
+    description: String
+    -- What this template generates and when it should be used.
+
+    output_kind: String
+    -- The kind of artifact this template produces.
+    -- Examples: "toml", "yaml", "python", "dockerfile", "json", "markdown".
+
+    trigger_paths: Set<String>
+    -- File paths this template can generate.
+    -- Examples: {"pyproject.toml"}, {".github/workflows/ci.yml"},
+    --           {"Dockerfile", "docker-compose.yml"}.
+    -- Used for template discovery: an agent can inspect available templates
+    -- and their trigger paths.
+}
+
+
+-- ============================================================================
+-- Given
+-- ============================================================================
+
+given {
+    catalog: TemplateCatalog
+}
+-- The template catalog is the collection of all available templates.
+-- It exists once per module scope. All rules inherit these bindings.
+
+entity TemplateCatalog {
+    templates: Set<Template>
+
+    -- Derived: template lookup by name
+    has_template(name): exists t in templates where t.name = name
+
+    -- Projections
+    templates_by_output(kind): templates where output_kind = kind
+}
+
+
+-- ============================================================================
+-- Actor declarations
+-- ============================================================================
+
+actor Requester {
+    identified_by: session_token
+}
+-- A requester is anyone (human or AI agent) who wants to generate
+-- artifacts. Identified by a session token representing the context
+-- they are working in — a project workspace, a CLI session, or an
+-- API client.
+--
+-- Both humans and agents are Requesters. The system does not
+-- distinguish between them at the domain level: both submit
+-- requests, check status, and retrieve results.
+
+
+-- ============================================================================
+-- Surfaces
+-- ============================================================================
+
+surface TemplateCatalogue {
+    facing requester: Requester
+
+    exposes:
+        for t in catalog.templates:
+            t.name
+            t.description
+            t.output_kind
+            t.trigger_paths
+
+    provides:
+        BrowseTemplates()
+            when requester != null
+        DescribeTemplate(name: String)
+            when requester != null
+        ShowSchema(name: String)
+            when requester != null
+
+    @guidance
+        -- Read-only view of all available templates. Use this to
+        -- discover what templates exist and what they generate
+        -- before submitting a request through ArtifactWorkshop.
+        --
+        -- DescribeTemplate returns template metadata (name, description,
+        -- output kind, trigger paths) for the named template.
+        -- ShowSchema returns the Pydantic schema for the named template.
+}
+
+
+-- ============================================================================
+-- Open questions
+-- ============================================================================
+
+open question "Should templates support an explicit version field?"
+open question "Can a template be renamed after it is loaded?"

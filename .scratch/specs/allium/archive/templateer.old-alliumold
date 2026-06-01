@@ -1,0 +1,399 @@
+-- allium: 3
+-- templateer.allium
+
+-- Scope: Templateer V2 — typed, constrained artifact generation for AI agents.
+-- Templateer replaces freeform LLM file generation with a constrained pipeline:
+--   user intent + project facts → LLM fills Pydantic model → Pydantic validates
+--   → Jinja renders deterministically from validated model only.
+--
+-- The central invariant: a renderer may only receive validated Pydantic model data.
+-- Includes: Template discovery (exact filename match), model generation via
+--   Pydantic AI, strict Jinja rendering, output validation, CLI + Python API.
+-- Excludes: Project state management, migration tools, patch management,
+--   managed regions, template migrations, long-term reconciliation.
+-- Dependencies: LLM (accessed through Pydantic AI, modelled as black box).
+
+
+-- ============================================================================
+-- External entities
+-- ============================================================================
+
+external entity TemplateRegistry {
+    templates: List<Template>
+}
+
+
+-- ============================================================================
+-- Value types
+-- ============================================================================
+
+value Context {
+    user_request: String
+    facts: Map<String, Any>
+}
+
+value OutputValidator {
+    kind: parse | command
+    language: String?
+    command_parts: List<String>?
+    optional: Boolean
+}
+
+
+-- ============================================================================
+-- Entities
+-- ============================================================================
+
+entity Template {
+    name: String
+    description: String
+    output_path: String
+    output_language: String
+    schema_module: String
+    schema_class: String
+    prompt_file: String
+    renderer_file: String
+    strict_context: Boolean
+    trigger_filenames: Set<String>
+    validators: List<OutputValidator>
+}
+
+entity Generation {
+    requested_path: String
+    user_request: String
+    context: Context
+
+    status: requested | model_pending | model_received
+          | model_validated | rendered | completed | failed
+
+    selected_template_name: String?
+    retry_count: Integer
+    raw_model_response: Map<String, Any>?
+    validation_errors: List<String>?
+    rendered_artifact: String?
+    output_validation_errors: List<String>?
+    failure_reason: String?
+
+    is_retryable: validation_errors != null and validation_errors.count > 0
+        and retry_count < config.max_retries_on_validation_failure
+
+    transitions status {
+        requested -> model_pending
+        requested -> failed
+        model_pending -> model_received
+        model_received -> model_validated
+        model_received -> model_pending
+        model_received -> failed
+        model_validated -> rendered
+        rendered -> completed
+        rendered -> failed
+        terminal: completed, failed
+    }
+}
+
+
+-- ============================================================================
+-- Module given and config
+-- ============================================================================
+
+given {
+    registry: TemplateRegistry
+}
+
+config {
+    default_model: String = "gpt-4.1-mini"
+    max_retries_on_validation_failure: Integer = 3
+}
+
+
+-- ============================================================================
+-- Rules
+-- ============================================================================
+
+rule CreateGeneration {
+    when: StartGeneration(requested_path, user_request, context)
+
+    ensures: Generation.created(
+        requested_path: requested_path,
+        user_request: user_request,
+        context: context,
+        status: requested,
+        retry_count: 0
+    )
+}
+
+rule MatchTemplate {
+    when: gen: Generation.status becomes requested
+
+    requires: gen.status = requested
+
+    let template = find_template_by_path(registry, gen.requested_path)
+
+    ensures:
+        if exists template:
+            gen.selected_template_name = template.name
+            gen.status = model_pending
+        else:
+            gen.failure_reason = "No template found for: " + gen.requested_path
+            gen.status = failed
+    @guidance
+        -- Exact filename match only. If no template's trigger_filenames contains
+        -- the requested path, the generation fails immediately.
+}
+
+rule RequestModelFromLLM {
+    when: gen: Generation.status becomes model_pending
+    requires: gen.status = model_pending
+    requires: gen.selected_template_name != null
+
+    let template_name = gen.selected_template_name
+    let template = find_template_by_name(registry, template_name)
+    let response = produce_structured_model(
+        config.default_model,
+        template.schema_module,
+        template.schema_class,
+        template.prompt_file,
+        gen.context
+    )
+
+    ensures: gen.raw_model_response = response
+    ensures: gen.status = model_received
+    @guidance
+        -- Pydantic AI sends schema + prompt + context to the LLM. The LLM
+        -- returns structured data matching the schema. Response is not yet
+        -- validated against the schema.
+}
+
+rule ValidateModel {
+    when: gen: Generation.status becomes model_received
+    requires: gen.status = model_received
+    requires: gen.selected_template_name != null
+    requires: gen.raw_model_response != null
+
+    let template_name = gen.selected_template_name
+    let template = find_template_by_name(registry, template_name)
+    let errors = validate_schema(
+        template.schema_module,
+        template.schema_class,
+        gen.raw_model_response
+    )
+
+    ensures:
+        if errors.count = 0:
+            gen.validation_errors = null
+            gen.status = model_validated
+        else if gen.is_retryable:
+            gen.validation_errors = errors
+            gen.retry_count = gen.retry_count + 1
+            gen.status = model_pending
+        else:
+            gen.validation_errors = errors
+            gen.failure_reason = "Model validation failed after max retries."
+            gen.status = failed
+    @guidance
+        -- Pydantic validates against the schema. On failure, errors feed back
+        -- to the LLM for retry, bounded by config.max_retries.
+}
+
+rule RenderArtifact {
+    when: gen: Generation.status becomes model_validated
+    requires: gen.status = model_validated
+    requires: gen.raw_model_response != null
+    requires: gen.selected_template_name != null
+
+    let template_name = gen.selected_template_name
+    let template = find_template_by_name(registry, template_name)
+    let render_context = gen.raw_model_response
+    let artifact = render_template(
+        template.renderer_file,
+        render_context,
+        template.strict_context
+    )
+
+    ensures: gen.rendered_artifact = artifact
+    ensures: gen.status = rendered
+    @guidance
+        -- MiniJinja renders from validated model dump only. No raw LLM output,
+        -- user prompt, env vars or filesystem data reach the template. If
+        -- strict_context is true, undefined variables are errors, not "".
+}
+
+rule ValidateOutput {
+    when: gen: Generation.status becomes rendered
+    requires: gen.status = rendered
+    requires: gen.selected_template_name != null
+
+    let template_name = gen.selected_template_name
+    let template = find_template_by_name(registry, template_name)
+    let errors = run_output_validators(
+        gen.rendered_artifact,
+        template.validators,
+        template.output_language
+    )
+
+    ensures:
+        if errors.count = 0:
+            gen.output_validation_errors = null
+            gen.status = completed
+        else:
+            gen.output_validation_errors = errors
+            gen.failure_reason = "Rendered artifact failed output validation."
+            gen.status = failed
+    @guidance
+        -- Output validation checks the final artifact: TOML/JSON/YAML parse,
+        -- Python AST parse. Optional validators that fail do not block.
+}
+
+rule ModelGenerationFailed {
+    when: gen: Generation.status becomes model_received
+    requires: gen.status = model_received
+    requires: gen.raw_model_response = null
+
+    ensures: gen.failure_reason = "LLM failed to produce a response."
+    ensures: gen.status = failed
+}
+
+
+-- ============================================================================
+-- Invariants
+-- ============================================================================
+
+invariant StrictRenderContract {
+    -- The Jinja renderer receives only the validated Pydantic model dump.
+    for gen in Generation where status in {rendered, completed}:
+        gen.rendered_artifact != null
+}
+
+invariant DeterministicRender {
+    -- Same model data + same template → same artifact.
+    for a in Generation where status = completed:
+        for b in Generation where status = completed:
+            if a.selected_template_name = b.selected_template_name
+            and a.raw_model_response = b.raw_model_response:
+                a.rendered_artifact = b.rendered_artifact
+}
+
+
+-- ============================================================================
+-- Actor declarations
+-- ============================================================================
+
+actor User {
+    identified_by: session_token
+}
+
+actor Code {
+    identified_by: api_key
+}
+
+
+-- ============================================================================
+-- CLI Surface
+-- ============================================================================
+
+surface CLI {
+    facing viewer: User
+
+    context templates: Template
+    context generation: Generation
+
+    exposes:
+        templates.name
+        templates.description
+        templates.output_path
+        templates.output_language
+        templates.trigger_filenames
+        generation.status
+        generation.user_request
+        generation.selected_template_name
+        generation.rendered_artifact
+        generation.failure_reason
+        generation.validation_errors
+        generation.output_validation_errors
+
+    provides:
+        StartGeneration(
+            requested_path: String,
+            user_request: String,
+            context_file: String
+        ) when viewer != null
+        ListTemplates when viewer != null
+        DescribeTemplate(templates.name)
+            when templates.name != null and viewer != null
+        ShowSchema(templates.name)
+            when templates.name != null and viewer != null
+        GenerateArtifact(
+            template_name: String,
+            context_file: String,
+            output_path: String
+        ) when viewer != null
+        RenderFromModel(
+            template_name: String,
+            model_file: String
+        ) when viewer != null
+        ValidateOutput(
+            template_name: String,
+            model_file: String
+        ) when viewer != null
+
+    @guidance
+        -- Commands: list, describe <name>, schema <name>, generate <name>,
+        -- render <name>, validate <name>.
+        -- Context files are JSON: {"user_request": "...", "facts": {...}}.
+        -- Model files are JSON matching the template schema.
+}
+
+
+-- ============================================================================
+-- Python API Surface
+-- ============================================================================
+
+surface PythonAPI {
+    facing caller: Code
+
+    context templates: Template
+    context generation: Generation
+
+    exposes:
+        templates.name
+        templates.description
+        generation.status
+        generation.user_request
+        generation.rendered_artifact
+        generation.failure_reason
+        generation.validation_errors
+        generation.output_validation_errors
+
+    provides:
+        StartGeneration(
+            requested_path: String,
+            user_request: String,
+            context: Map<String, Any>
+        ) when caller != null
+        ListAllTemplates when caller != null
+        GenerateFromTemplate(
+            template_name: String,
+            user_request: String,
+            context: Map<String, Any>
+        ) when caller != null
+        RenderFromModel(
+            template_name: String,
+            model: Map<String, Any>
+        ) when caller != null
+        ValidateArtifact(
+            template_name: String,
+            artifact: String
+        ) when caller != null
+
+    @guidance
+        -- TemplateRegistry and Template are the primary classes.
+        -- Generation result: template_name, model, artifact, messages.
+}
+
+
+-- ============================================================================
+-- Open questions
+-- ============================================================================
+
+open question "Should Generation be synchronous only, or support async LLM calls?"
+open question "How should the StartGeneration trigger resolve context JSON to the Context value type?"

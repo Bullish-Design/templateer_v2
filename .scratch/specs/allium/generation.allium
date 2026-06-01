@@ -1,0 +1,327 @@
+-- allium: 3
+-- generation.allium
+-- The generation lifecycle for Templateer V2.
+--
+-- A generation is the process of producing an artifact from a template.
+-- The lifecycle:
+--   1. Requester submits a generation request → Generation entity created
+--   2. System resolves the template by name → moves to generating or fails
+--   3. Artifact production completes → moves to ready or fails
+--   4. Failed generations may be retried
+--
+-- Key invariant: a renderer may only receive validated structured data.
+-- No raw LLM output, user prompt, or unrestricted filesystem context
+-- reaches the renderer. The intermediate model is the contract.
+--
+-- Includes: Generation entity, rules, invariants, actors, and surfaces
+-- for the artifact generation workshop and template catalogue.
+
+use "./templates.allium" as templates
+
+
+-- ============================================================================
+-- Enumerations
+-- ============================================================================
+
+enum FailureReason {
+    no_template
+    | model_validation_failed
+    | render_failed
+    | output_validation_failed
+    | llm_failed
+}
+-- Taxonomy of generation failure reasons.
+-- no_template:              the named template does not exist in the catalog
+-- model_validation_failed:  the LLM output did not satisfy the Pydantic schema
+-- render_failed:            the Jinja template referenced an undefined variable
+-- output_validation_failed: the rendered artifact failed post-render validation
+-- llm_failed:               the LLM did not return a usable response
+
+
+-- ============================================================================
+-- Value types
+-- ============================================================================
+
+value ProjectFacts {
+    facts: Map<String, Any>
+}
+-- Structured context about the project that helps fill the template schema.
+-- Facts are template-specific and agent-supplied.
+-- Examples: {"uses_fastapi": true, "package_manager": "uv"}
+
+
+-- ============================================================================
+-- Entities
+-- ============================================================================
+
+entity Generation {
+    -- Request identity
+    requested_path: String
+    -- The artifact path the requester wants to generate.
+    -- Examples: "pyproject.toml", ".github/workflows/ci.yml", "Dockerfile"
+
+    template_name: String
+    -- The template to use for this generation.
+    -- Must match a Template.name in the catalog, or the generation fails.
+
+    -- Lifecycle
+    status: submitted | generating | ready | failed
+    -- submitted:   request received, template not yet resolved
+    -- generating:  template resolved, system producing artifact
+    -- ready:       artifact produced and available
+    -- failed:      something went wrong
+
+    transitions status {
+        submitted -> generating
+        submitted -> failed
+        generating -> ready
+        generating -> failed
+        terminal: ready, failed
+    }
+
+    matched_template: templates/Template?
+    -- Set when a template is found. Remains null if lookup fails.
+
+    artifact: String?
+    -- The generated artifact content. Set when status becomes ready.
+
+    failure_reason: FailureReason?
+    -- Why the generation failed: no_template, model_validation_failed,
+    -- render_failed, output_validation_failed, or llm_failed.
+
+    retry_count: Integer
+    -- How many times this generation has been retried after failure.
+
+    -- Derived
+    can_retry: status = failed and retry_count < config.max_retries
+    is_done: status in {ready, failed}
+}
+
+
+-- ============================================================================
+-- Config
+-- ============================================================================
+
+config {
+    max_retries: Integer = 3
+}
+
+
+-- ============================================================================
+-- Rules
+-- ============================================================================
+
+-- -----------------------------------------------------------
+-- 1. Request submission
+-- -----------------------------------------------------------
+
+rule SubmitGeneration {
+    when: GenerateArtifact(
+        requested_path,
+        template_name,
+        user_intent,
+        project_facts
+    )
+
+    ensures: Generation.created(
+        requested_path: requested_path,
+        template_name: template_name,
+        status: submitted,
+        retry_count: 0
+    )
+    ensures: TaskStarted(
+        what: artifact_generation,
+        path: requested_path,
+        template: template_name
+    )
+    @guidance
+        -- The requester specifies which template to use by name.
+        -- user_intent and project_facts are passed to the LLM as
+        -- black box context but are not tracked on the entity.
+}
+
+-- -----------------------------------------------------------
+-- 2. Template resolution
+-- -----------------------------------------------------------
+
+rule ResolveTemplate {
+    when: gen: Generation.status becomes submitted
+
+    requires: gen.status = submitted
+    requires: gen.template_name != null
+
+    let found = templates/catalog.has_template(gen.template_name)
+
+    ensures:
+        if found:
+            gen.status = generating
+            gen.matched_template =
+                templates/catalog.find_template(gen.template_name)
+        else:
+            gen.status = failed
+            gen.failure_reason = no_template
+    @guidance
+        -- Template lookup is exact name match only. The template_name
+        -- must match a Template.name in the catalog. If no template
+        -- with that name exists, the generation fails immediately with
+        -- reason no_template.
+}
+
+-- -----------------------------------------------------------
+-- 3. Artifact completion
+-- -----------------------------------------------------------
+
+rule DeliverArtifact {
+    when: ArtifactReady(generation, artifact)
+
+    requires: exists generation
+    requires: generation.status = generating
+
+    ensures: generation.status = ready
+    ensures: generation.artifact = artifact
+    @guidance
+        -- The artifact production process (LLM model filling + Jinja
+        -- rendering) is modelled as an external black box. When it
+        -- completes successfully, it emits ArtifactReady with the
+        -- rendered artifact. The generation transitions to ready.
+}
+
+-- -----------------------------------------------------------
+-- 4. Generation failure
+-- -----------------------------------------------------------
+
+rule FailGeneration {
+    when: GenerationError(generation, reason)
+
+    requires: exists generation
+    requires: generation.status = generating
+
+    ensures: generation.status = failed
+    ensures: generation.failure_reason = reason
+    @guidance
+        -- Catches failures from the artifact production process.
+        -- The reason describes what went wrong (model validation,
+        -- render failure, output validation, LLM error).
+}
+
+-- -----------------------------------------------------------
+-- 5. Retry
+-- -----------------------------------------------------------
+
+rule RetryFailedGeneration {
+    when: RetryGeneration(generation)
+
+    requires: exists generation
+    requires: generation.can_retry
+
+    ensures: generation.status = submitted
+    ensures: generation.failure_reason = null
+    ensures: generation.retry_count = generation.retry_count + 1
+    ensures: generation.artifact = null
+    ensures: generation.matched_template = null
+    @guidance
+        -- A failed generation can be retried up to config.max_retries
+        -- times. The retry resets the generation to submitted state,
+        -- clearing the failure and artifact, so the resolution and
+        -- production rules fire again.
+}
+
+
+-- ============================================================================
+-- Invariants
+-- ============================================================================
+
+invariant ArtifactImpliesReady {
+    for gen in Generations:
+        gen.artifact != null implies gen.status = ready
+}
+-- An artifact is only set when the generation has completed successfully.
+
+invariant FailureImpliesReason {
+    for gen in Generations:
+        gen.status = failed implies gen.failure_reason != null
+}
+-- Every failed generation has an explanation of why.
+
+invariant TemplateOnlyAfterMatch {
+    for gen in Generations:
+        gen.matched_template != null
+            implies gen.status in {generating, ready, failed}
+}
+-- A template is only matched during or after generation.
+
+invariant ReadyImpliesArtifact {
+    for gen in Generations:
+        gen.status = ready implies gen.artifact != null
+}
+-- A completed generation always has its artifact available.
+
+
+-- ============================================================================
+-- Surfaces
+-- ============================================================================
+
+surface ArtifactWorkshop {
+    facing requester: templates/Requester
+
+    exposes:
+        for g in Generations:
+            g.requested_path
+            g.template_name
+            g.status
+            g.failure_reason
+            g.retry_count
+            g.matched_template.name
+                when g.matched_template != null
+            g.is_done
+            g.can_retry
+            g.artifact
+                when g.status = ready
+
+    provides:
+        GenerateArtifact(
+            requested_path: String,
+            template_name: String,
+            user_intent: String?,
+            project_facts: ProjectFacts?
+        ) when requester != null
+        RetryGeneration(g)
+            when g.can_retry
+
+    related:
+        templates/TemplateCatalogue()
+            when requester != null
+
+    @guarantee StrictRenderContract
+        -- The generated artifact is produced only from validated
+        -- structured data. No raw LLM response, user prompt, or
+        -- unrestricted context reaches the renderer. The Pydantic
+        -- model is the sole interface between the LLM and the
+        -- rendering step.
+
+    @guarantee DeterministicRender
+        -- Given the same template and the same structured model
+        -- data, rendering produces byte-identical output.
+
+    @guidance
+        -- The requester identifies a template by name (directory name).
+        -- Matching is exact: either a template with that name exists
+        -- or it doesn't. No scoring, no confidence, no fuzzy matching.
+        --
+        -- To generate an artifact:
+        --   1. Browse TemplateCatalogue to see what's available
+        --   2. Call GenerateArtifact(path, template_name, intent, facts)
+        --   3. Poll g.artifact when g.is_done = true
+        --   4. If g.status = failed and g.can_retry = true,
+        --      call RetryGeneration(g)
+}
+
+
+-- ============================================================================
+-- Open questions
+-- ============================================================================
+
+open question "Should Generations be removed after delivery, or retained as history?"
+open question "Should ProjectFacts be template-specific value types instead of a generic key-value map?"
+open question "Should there be a TemplateCustodian actor for template lifecycle management (add, remove, update templates)?"
+open question "Should the surface distinguish between human and agent requesters, or are they identical as the spec assumes?"
