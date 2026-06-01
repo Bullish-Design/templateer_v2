@@ -1,0 +1,26 @@
+{
+  "project_name": "fastapi-app",
+  "project_description": "A FastAPI web application",
+  "python_version": "3.12",
+  "project_type": "application",
+  "dependencies": [
+    {"name": "fastapi", "version": ">=0.115.0"},
+    {"name": "uvicorn", "version": ">=0.32.0"},
+    {"name": "pydantic", "version": ">=2.0"},
+    {"name": "sqlmodel", "version": ">=0.0.22"}
+  ],
+  "dev_dependencies": [
+    {"name": "pytest", "version": ">=8.0"},
+    {"name": "httpx", "version": ">=0.28.0"}
+  ],
+  "ruff": {
+    "line_length": 100,
+    "target_version": "py312",
+    "select": ["E", "F", "I", "N", "W"],
+    "ignore": []
+  },
+  "pytest": {
+    "testpaths": ["tests"],
+    "addopts": ["-v", "--tb=short"]
+  }
+}
