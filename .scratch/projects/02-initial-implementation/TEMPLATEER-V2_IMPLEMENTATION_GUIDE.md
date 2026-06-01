@@ -78,7 +78,7 @@ All implementation decisions must align with these specs. See [Allium Spec Align
 | Template rendering | MiniJinja (Python bindings) or Jinja2 with strict mode |
 | CLI framework | Click or Typer |
 | Testing | Pytest |
-| Type checking | Mypy (strict mode) |
+| Type checking | ty (strict mode) |
 | Linting | Ruff |
 
 ---
@@ -137,7 +137,7 @@ dependencies = [
 dev = [
     "pytest>=8.0",
     "pytest-cov>=5.0",
-    "mypy>=1.0",
+    "ty>=1.0",
     "ruff>=0.3.0",
 ]
 
@@ -155,7 +155,7 @@ select = ["E", "F", "I", "N", "W"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 
-[tool.mypy]
+[tool.ty]
 strict = true
 python_version = "3.12"
 ```
@@ -180,7 +180,7 @@ __version__ = "0.1.0"
 ### Phase 0 Testing
 
 - [ ] `uv run pytest` runs and finds 0 tests (empty test suite)
-- [ ] `uv run mypy src/` passes with no errors
+- [ ] `uv run ty src/` passes with no errors
 - [ ] `uv run ruff check src/` passes with no errors
 - [ ] `python -c "import templateer; print(templateer.__version__)"` prints `0.1.0`
 
@@ -2827,7 +2827,7 @@ Ensure all error paths produce clear, actionable messages:
 ### Step 11.3: Type checking
 
 ```bash
-uv run mypy src/templateer/ --strict
+uv run ty src/templateer/ --strict
 ```
 
 Fix all type errors.
@@ -2858,7 +2858,7 @@ Add developer-focused docs:
 
 - [ ] README is complete and accurate
 - [ ] All error paths have clear messages
-- [ ] `mypy --strict` passes
+- [ ] `ty --strict` passes
 - [ ] `ruff check` passes
 - [ ] Test coverage >80%
 - [ ] Docstrings on all public functions and classes
@@ -3043,7 +3043,7 @@ templateer/
 
 | Phase | Verification Command |
 |-------|---------------------|
-| 0 | `uv run pytest && uv run mypy src/ && uv run ruff check src/` |
+| 0 | `uv run pytest && uv run ty src/ && uv run ruff check src/` |
 | 1 | `uv run pytest tests/test_models.py -v` |
 | 2 | `uv run pytest tests/test_catalog.py tests/test_template.py -v` |
 | 3 | `uv run pytest tests/test_validation.py -v` |
@@ -3054,4 +3054,4 @@ templateer/
 | 8 | `uv run pytest tests/test_cli.py -v && templateer list` |
 | 9 | `uv run pytest tests/test_api.py -v` |
 | 10 | `uv run pytest tests/test_integration.py -v` |
-| 11 | `uv run pytest --cov=templateer && uv run mypy src/ && uv run ruff check src/` |
+| 11 | `uv run pytest --cov=templateer && uv run ty src/ && uv run ruff check src/` |
