@@ -8,11 +8,10 @@ import json
 from pathlib import Path
 
 import pytest
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field
 
 from templateer.template import Template
 from templateer.validation import validate_model_instance
-
 
 # ---------------------------------------------------------------------------
 # Fixtures

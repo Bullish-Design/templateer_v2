@@ -3,8 +3,7 @@
 import logging
 from pathlib import Path
 
-from templateer.template import Template, TemplateNotFoundError, TemplateLoadError
-
+from templateer.template import Template, TemplateLoadError, TemplateNotFoundError
 
 logger = logging.getLogger(__name__)
 

@@ -20,7 +20,6 @@ from templateer.generation import (
 from templateer.pipeline import PipelineError, retry_generation, run_pipeline
 from templateer.validators import validate_output
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -344,8 +343,6 @@ class TestEndToEndWithoutLLM:
         self, catalog: TemplateCatalog
     ) -> None:
         """A model producing invalid TOML fails output validation."""
-        template = catalog.get("pyproject-uv")
-
         # This won't render invalid TOML since the template is good,
         # but we can directly validate bad TOML
         errors = validate_output("not valid toml {{{", "toml")

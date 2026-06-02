@@ -5,10 +5,8 @@ artifacts in TOML, JSON, YAML, and Python, and that custom validators
 (parse and command kinds) work as expected.
 """
 
-import pytest
 
 from templateer.validators import validate_output
-
 
 # ---------------------------------------------------------------------------
 # TOML validation

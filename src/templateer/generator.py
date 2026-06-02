@@ -23,7 +23,7 @@ import json
 from typing import Any
 
 from pydantic import BaseModel, ValidationError
-from pydantic_ai import Agent, ModelRetry
+from pydantic_ai import Agent
 
 from templateer.template import Template
 from templateer.validation import validate_model_instance

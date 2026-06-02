@@ -62,6 +62,9 @@ class Template:
                 f"directory name '{root.name}'"
             )
 
+        # Cache for lazily-loaded resources
+        self._schema_class_cache: type[BaseModel] | None = None
+
     @property
     def name(self) -> str:
         """The template name (matches directory name)."""
@@ -122,7 +125,7 @@ class Template:
 
     def get_schema_class(self) -> type[BaseModel]:
         """
-        Load and return the Pydantic model class.
+        Load and return the Pydantic model class (cached).
 
         Returns:
             The Pydantic model class.
@@ -130,6 +133,9 @@ class Template:
         Raises:
             TemplateLoadError: If the class cannot be found or is not a BaseModel.
         """
+        if self._schema_class_cache is not None:
+            return self._schema_class_cache
+
         module = self.load_schema_module()
         class_name = self.metadata.schema_ref.class_name
 
@@ -145,6 +151,7 @@ class Template:
                 f"'{class_name}' is not a Pydantic BaseModel subclass"
             )
 
+        self._schema_class_cache = cls
         return cls
 
     def get_schema_json(self) -> dict[str, Any]:
