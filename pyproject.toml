@@ -45,7 +45,7 @@ target-version = "py312"
 select = ["E", "F", "I", "N", "W"]
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["tests", "templates"]
 
 [tool.ty]
 # ty uses pyproject.toml project metadata (requires-python, name) by default.
