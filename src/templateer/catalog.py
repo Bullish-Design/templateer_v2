@@ -67,9 +67,7 @@ class TemplateCatalog:
             TemplateNotFoundError: If no template with that name exists.
         """
         if name not in self._templates:
-            raise TemplateNotFoundError(
-                f"No template found with name: {name}"
-            )
+            raise TemplateNotFoundError(f"No template found with name: {name}")
         return self._templates[name]
 
     def templates_by_output_kind(self, kind: str) -> list[Template]:

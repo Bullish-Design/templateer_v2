@@ -36,9 +36,7 @@ def catalog() -> TemplateCatalog:
 @pytest.fixture
 def fastapi_input() -> dict:
     """The FastAPI example input fixture as a dict."""
-    return json.loads(
-        (Path("templates/pyproject-uv/examples/fastapi.input.json")).read_text()
-    )
+    return json.loads((Path("templates/pyproject-uv/examples/fastapi.input.json")).read_text())
 
 
 # ---------------------------------------------------------------------------
@@ -247,9 +245,7 @@ class TestRetryLogic:
         with pytest.raises(ValueError, match="cannot be retried"):
             retry_generation(catalog, gen, "test")
 
-    def test_retry_no_template_succeeds_if_template_added(
-        self, catalog: TemplateCatalog
-    ) -> None:
+    def test_retry_no_template_succeeds_if_template_added(self, catalog: TemplateCatalog) -> None:
         """Retrying a NO_TEMPLATE failure works if template now exists."""
         gen = Generation(
             requested_path="",
@@ -272,9 +268,7 @@ class TestRetryLogic:
         assert result.retry_count == 1
         assert result.is_done
 
-    def test_retry_increments_retry_count(
-        self, catalog: TemplateCatalog
-    ) -> None:
+    def test_retry_increments_retry_count(self, catalog: TemplateCatalog) -> None:
         """Retry passes incremented retry_count."""
         gen = Generation(
             requested_path="",
@@ -339,18 +333,14 @@ class TestEndToEndWithoutLLM:
         errors = validate_output(rendered, "toml")
         assert errors == []
 
-    def test_invalid_model_rendering_fails_validation(
-        self, catalog: TemplateCatalog
-    ) -> None:
+    def test_invalid_model_rendering_fails_validation(self, catalog: TemplateCatalog) -> None:
         """A model producing invalid TOML fails output validation."""
         # This won't render invalid TOML since the template is good,
         # but we can directly validate bad TOML
         errors = validate_output("not valid toml {{{", "toml")
         assert len(errors) > 0
 
-    def test_render_failure_in_pipeline_path(
-        self, catalog: TemplateCatalog
-    ) -> None:
+    def test_render_failure_in_pipeline_path(self, catalog: TemplateCatalog) -> None:
         """A template-based render failure is captured as RENDER_FAILED."""
         # Verify the error handling path works by constructing
         # a generation with RENDER_FAILED
@@ -380,9 +370,7 @@ class TestPipelineWithLLM:
     """Full end-to-end pipeline tests that require an LLM API key."""
 
     @has_api_key
-    def test_pipeline_generate_end_to_end(
-        self, catalog: TemplateCatalog
-    ) -> None:
+    def test_pipeline_generate_end_to_end(self, catalog: TemplateCatalog) -> None:
         """Full pipeline: template resolve → LLM → render → validate."""
         gen = run_pipeline(
             catalog,

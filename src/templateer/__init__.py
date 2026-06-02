@@ -7,5 +7,5 @@ __version__ = "0.1.0"
 # Default template search paths
 DEFAULT_TEMPLATE_PATHS = [
     Path(__file__).parent / "templates",  # bundled templates
-    Path.cwd() / "templates",             # project-local templates
+    Path.cwd() / "templates",  # project-local templates
 ]

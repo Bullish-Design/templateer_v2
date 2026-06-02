@@ -91,9 +91,7 @@ def generate_model(
     try:
         result = agent.run_sync(context_text)
     except Exception as e:
-        raise ModelGenerationError(
-            f"LLM call failed after {max_retries + 1} attempt(s): {e}"
-        )
+        raise ModelGenerationError(f"LLM call failed after {max_retries + 1} attempt(s): {e}")
 
     # The Agent with output_type set returns a validated BaseModel instance
     # in result.output. Pydantic AI handles validation internally and retries
@@ -102,8 +100,7 @@ def generate_model(
 
     if raw_output is None:
         raise ModelGenerationError(
-            "LLM returned None instead of a valid model after "
-            f"{agent.retries} retries"
+            f"LLM returned None instead of a valid model after {agent.retries} retries"
         )
 
     if not isinstance(raw_output, schema_class):
@@ -113,9 +110,7 @@ def generate_model(
             validated, errors = validate_model_instance(schema_class, raw_output)
             if validated is not None:
                 return validated, messages
-            raise ModelGenerationError(
-                f"Model validation failed: {'; '.join(errors)}"
-            )
+            raise ModelGenerationError(f"Model validation failed: {'; '.join(errors)}")
         raise ModelGenerationError(
             f"LLM returned unexpected output type: {type(raw_output).__name__}. "
             f"Expected {schema_class.__name__}."
@@ -127,13 +122,9 @@ def generate_model(
         validated_data = raw_output.model_dump(mode="json")
         validated, errors = validate_model_instance(schema_class, validated_data)
         if errors:
-            raise ModelGenerationError(
-                f"Post-generation validation failed: {'; '.join(errors)}"
-            )
+            raise ModelGenerationError(f"Post-generation validation failed: {'; '.join(errors)}")
     except ValidationError as e:
-        raise ModelGenerationError(
-            f"Post-generation validation error: {e}"
-        )
+        raise ModelGenerationError(f"Post-generation validation error: {e}")
 
     return raw_output, messages
 

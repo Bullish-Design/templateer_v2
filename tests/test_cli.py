@@ -76,25 +76,17 @@ class TestListTemplates:
 class TestDescribeTemplate:
     """Tests for the ``templateer describe`` command."""
 
-    def test_describe_shows_metadata(
-        self, runner: CliRunner, templates_arg: list[str]
-    ) -> None:
+    def test_describe_shows_metadata(self, runner: CliRunner, templates_arg: list[str]) -> None:
         """Describe shows template name, description, and triggers."""
-        result = runner.invoke(
-            main, ["describe", "pyproject-uv", *templates_arg]
-        )
+        result = runner.invoke(main, ["describe", "pyproject-uv", *templates_arg])
         assert result.exit_code == 0
         assert "pyproject-uv" in result.output
         assert "Description:" in result.output
         assert "Output kind:" in result.output
 
-    def test_describe_unknown_template(
-        self, runner: CliRunner, templates_arg: list[str]
-    ) -> None:
+    def test_describe_unknown_template(self, runner: CliRunner, templates_arg: list[str]) -> None:
         """Describe of an unknown template exits with error."""
-        result = runner.invoke(
-            main, ["describe", "nonexistent", *templates_arg]
-        )
+        result = runner.invoke(main, ["describe", "nonexistent", *templates_arg])
         assert result.exit_code == 1
 
 
@@ -106,13 +98,9 @@ class TestDescribeTemplate:
 class TestShowSchema:
     """Tests for the ``templateer schema`` command."""
 
-    def test_schema_outputs_valid_json(
-        self, runner: CliRunner, templates_arg: list[str]
-    ) -> None:
+    def test_schema_outputs_valid_json(self, runner: CliRunner, templates_arg: list[str]) -> None:
         """Schema command outputs valid JSON that can be parsed."""
-        result = runner.invoke(
-            main, ["schema", "pyproject-uv", *templates_arg]
-        )
+        result = runner.invoke(main, ["schema", "pyproject-uv", *templates_arg])
         assert result.exit_code == 0
         schema = json.loads(result.output)
         assert "properties" in schema
@@ -122,9 +110,7 @@ class TestShowSchema:
         self, runner: CliRunner, templates_arg: list[str]
     ) -> None:
         """Schema output includes expected model fields."""
-        result = runner.invoke(
-            main, ["schema", "pyproject-uv", *templates_arg]
-        )
+        result = runner.invoke(main, ["schema", "pyproject-uv", *templates_arg])
         assert result.exit_code == 0
         schema = json.loads(result.output)
         props = schema.get("properties", {})
@@ -132,13 +118,9 @@ class TestShowSchema:
         assert "python_version" in props
         assert "dependencies" in props
 
-    def test_schema_unknown_template(
-        self, runner: CliRunner, templates_arg: list[str]
-    ) -> None:
+    def test_schema_unknown_template(self, runner: CliRunner, templates_arg: list[str]) -> None:
         """Schema of an unknown template exits with error."""
-        result = runner.invoke(
-            main, ["schema", "nonexistent", *templates_arg]
-        )
+        result = runner.invoke(main, ["schema", "nonexistent", *templates_arg])
         assert result.exit_code == 1
 
 
@@ -157,11 +139,16 @@ class TestRenderFromModel:
         fastapi_input_file: Path,
     ) -> None:
         """Render produces output containing expected TOML sections."""
-        result = runner.invoke(main, [
-            "render", "pyproject-uv",
-            "--input", str(fastapi_input_file),
-            *templates_arg,
-        ])
+        result = runner.invoke(
+            main,
+            [
+                "render",
+                "pyproject-uv",
+                "--input",
+                str(fastapi_input_file),
+                *templates_arg,
+            ],
+        )
         assert result.exit_code == 0
         assert "[project]" in result.output
         assert "fastapi-app" in result.output
@@ -175,12 +162,18 @@ class TestRenderFromModel:
     ) -> None:
         """Render --output writes to the specified file."""
         out_file = tmp_path / "output.toml"
-        result = runner.invoke(main, [
-            "render", "pyproject-uv",
-            "--input", str(fastapi_input_file),
-            "--output", str(out_file),
-            *templates_arg,
-        ])
+        result = runner.invoke(
+            main,
+            [
+                "render",
+                "pyproject-uv",
+                "--input",
+                str(fastapi_input_file),
+                "--output",
+                str(out_file),
+                *templates_arg,
+            ],
+        )
         assert result.exit_code == 0
         assert out_file.exists()
         content = out_file.read_text()
@@ -196,11 +189,16 @@ class TestRenderFromModel:
         bad_input = tmp_path / "bad_input.json"
         bad_input.write_text("{}")
 
-        result = runner.invoke(main, [
-            "render", "pyproject-uv",
-            "--input", str(bad_input),
-            *templates_arg,
-        ])
+        result = runner.invoke(
+            main,
+            [
+                "render",
+                "pyproject-uv",
+                "--input",
+                str(bad_input),
+                *templates_arg,
+            ],
+        )
         assert result.exit_code == 1
 
     def test_render_unknown_template(
@@ -210,11 +208,16 @@ class TestRenderFromModel:
         fastapi_input_file: Path,
     ) -> None:
         """Render with unknown template exits with error."""
-        result = runner.invoke(main, [
-            "render", "nonexistent",
-            "--input", str(fastapi_input_file),
-            *templates_arg,
-        ])
+        result = runner.invoke(
+            main,
+            [
+                "render",
+                "nonexistent",
+                "--input",
+                str(fastapi_input_file),
+                *templates_arg,
+            ],
+        )
         assert result.exit_code == 1
 
     def test_render_missing_input_file(
@@ -223,11 +226,16 @@ class TestRenderFromModel:
         templates_arg: list[str],
     ) -> None:
         """Render with missing input file exits with error."""
-        result = runner.invoke(main, [
-            "render", "pyproject-uv",
-            "--input", "/nonexistent/file.json",
-            *templates_arg,
-        ])
+        result = runner.invoke(
+            main,
+            [
+                "render",
+                "pyproject-uv",
+                "--input",
+                "/nonexistent/file.json",
+                *templates_arg,
+            ],
+        )
         assert result.exit_code == 1
 
     def test_render_matches_fastapi_fixture(
@@ -237,17 +245,19 @@ class TestRenderFromModel:
         fastapi_input_file: Path,
     ) -> None:
         """Rendered output matches the expected FastAPI fixture."""
-        result = runner.invoke(main, [
-            "render", "pyproject-uv",
-            "--input", str(fastapi_input_file),
-            *templates_arg,
-        ])
+        result = runner.invoke(
+            main,
+            [
+                "render",
+                "pyproject-uv",
+                "--input",
+                str(fastapi_input_file),
+                *templates_arg,
+            ],
+        )
         assert result.exit_code == 0
 
-        expected = (
-            Path("templates/pyproject-uv/examples/fastapi.output.toml")
-            .read_text()
-        )
+        expected = Path("templates/pyproject-uv/examples/fastapi.output.toml").read_text()
         assert result.output.strip() == expected.strip()
 
     def test_render_minimal_model(
@@ -258,16 +268,25 @@ class TestRenderFromModel:
     ) -> None:
         """Render a minimal model (only required fields)."""
         minimal = tmp_path / "minimal.json"
-        minimal.write_text(json.dumps({
-            "project_name": "minimal-project",
-            "python_version": "3.12",
-        }))
+        minimal.write_text(
+            json.dumps(
+                {
+                    "project_name": "minimal-project",
+                    "python_version": "3.12",
+                }
+            )
+        )
 
-        result = runner.invoke(main, [
-            "render", "pyproject-uv",
-            "--input", str(minimal),
-            *templates_arg,
-        ])
+        result = runner.invoke(
+            main,
+            [
+                "render",
+                "pyproject-uv",
+                "--input",
+                str(minimal),
+                *templates_arg,
+            ],
+        )
         assert result.exit_code == 0
         assert "minimal-project" in result.output
         assert "3.12" in result.output
@@ -280,34 +299,36 @@ class TestRenderFromModel:
     ) -> None:
         """Render a model with all optional fields populated."""
         full = tmp_path / "full.json"
-        full.write_text(json.dumps({
-            "project_name": "full-project",
-            "project_description": "A project with everything",
-            "python_version": "3.12",
-            "project_type": "application",
-            "dependencies": [
-                {"name": "requests", "version": ">=2.31.0"}
-            ],
-            "dev_dependencies": [
-                {"name": "pytest", "version": ">=8.0"}
-            ],
-            "ruff": {
-                "line_length": 88,
-                "target_version": "py312",
-                "select": ["E", "F", "I"],
-                "ignore": []
-            },
-            "pytest": {
-                "testpaths": ["tests"],
-                "addopts": ["-v"]
-            },
-        }))
+        full.write_text(
+            json.dumps(
+                {
+                    "project_name": "full-project",
+                    "project_description": "A project with everything",
+                    "python_version": "3.12",
+                    "project_type": "application",
+                    "dependencies": [{"name": "requests", "version": ">=2.31.0"}],
+                    "dev_dependencies": [{"name": "pytest", "version": ">=8.0"}],
+                    "ruff": {
+                        "line_length": 88,
+                        "target_version": "py312",
+                        "select": ["E", "F", "I"],
+                        "ignore": [],
+                    },
+                    "pytest": {"testpaths": ["tests"], "addopts": ["-v"]},
+                }
+            )
+        )
 
-        result = runner.invoke(main, [
-            "render", "pyproject-uv",
-            "--input", str(full),
-            *templates_arg,
-        ])
+        result = runner.invoke(
+            main,
+            [
+                "render",
+                "pyproject-uv",
+                "--input",
+                str(full),
+                *templates_arg,
+            ],
+        )
         assert result.exit_code == 0
         assert "full-project" in result.output
         assert "requests" in result.output
@@ -329,11 +350,16 @@ class TestValidateOutput:
         fastapi_input_file: Path,
     ) -> None:
         """Validate passes (exit 0) for a valid model."""
-        result = runner.invoke(main, [
-            "validate", "pyproject-uv",
-            "--input", str(fastapi_input_file),
-            *templates_arg,
-        ])
+        result = runner.invoke(
+            main,
+            [
+                "validate",
+                "pyproject-uv",
+                "--input",
+                str(fastapi_input_file),
+                *templates_arg,
+            ],
+        )
         assert result.exit_code == 0
         assert "Model validated against schema" in result.output
         assert "Template rendered successfully" in result.output
@@ -349,11 +375,16 @@ class TestValidateOutput:
         bad = tmp_path / "bad.json"
         bad.write_text("{}")
 
-        result = runner.invoke(main, [
-            "validate", "pyproject-uv",
-            "--input", str(bad),
-            *templates_arg,
-        ])
+        result = runner.invoke(
+            main,
+            [
+                "validate",
+                "pyproject-uv",
+                "--input",
+                str(bad),
+                *templates_arg,
+            ],
+        )
         assert result.exit_code == 1
         assert "Model validation failed" in result.output
 
@@ -364,11 +395,16 @@ class TestValidateOutput:
         fastapi_input_file: Path,
     ) -> None:
         """Validate with unknown template exits with error."""
-        result = runner.invoke(main, [
-            "validate", "nonexistent",
-            "--input", str(fastapi_input_file),
-            *templates_arg,
-        ])
+        result = runner.invoke(
+            main,
+            [
+                "validate",
+                "nonexistent",
+                "--input",
+                str(fastapi_input_file),
+                *templates_arg,
+            ],
+        )
         assert result.exit_code == 1
 
 
@@ -390,11 +426,16 @@ class TestGenerateArtifact:
         templates_arg: list[str],
     ) -> None:
         """Generate with unknown template exits with error."""
-        result = runner.invoke(main, [
-            "generate", "nonexistent",
-            "--request", "test request",
-            *templates_arg,
-        ])
+        result = runner.invoke(
+            main,
+            [
+                "generate",
+                "nonexistent",
+                "--request",
+                "test request",
+                *templates_arg,
+            ],
+        )
         assert result.exit_code == 1
         assert "Generation failed" in result.output
 
@@ -405,10 +446,14 @@ class TestGenerateArtifact:
     ) -> None:
         """Generate with unknown template but no explicit request uses
         a default request string."""
-        result = runner.invoke(main, [
-            "generate", "nonexistent",
-            *templates_arg,
-        ])
+        result = runner.invoke(
+            main,
+            [
+                "generate",
+                "nonexistent",
+                *templates_arg,
+            ],
+        )
         assert result.exit_code == 1
         # The default request is set internally; the failure should
         # still be a clean generation failure.
@@ -425,11 +470,16 @@ class TestGenerateArtifact:
         ctx = tmp_path / "context.json"
         ctx.write_text(json.dumps({"uses_fastapi": True}))
 
-        result = runner.invoke(main, [
-            "generate", "nonexistent",
-            "--context", str(ctx),
-            *templates_arg,
-        ])
+        result = runner.invoke(
+            main,
+            [
+                "generate",
+                "nonexistent",
+                "--context",
+                str(ctx),
+                *templates_arg,
+            ],
+        )
         assert result.exit_code == 1
 
     def test_generate_invalid_context_file(
@@ -439,11 +489,16 @@ class TestGenerateArtifact:
         tmp_path: Path,
     ) -> None:
         """Generate with missing context file exits with error."""
-        result = runner.invoke(main, [
-            "generate", "pyproject-uv",
-            "--context", "/nonexistent/context.json",
-            *templates_arg,
-        ])
+        result = runner.invoke(
+            main,
+            [
+                "generate",
+                "pyproject-uv",
+                "--context",
+                "/nonexistent/context.json",
+                *templates_arg,
+            ],
+        )
         assert result.exit_code == 1
 
     def test_generate_invalid_json_context(
@@ -456,11 +511,16 @@ class TestGenerateArtifact:
         bad_ctx = tmp_path / "bad_context.json"
         bad_ctx.write_text("not json {{{")
 
-        result = runner.invoke(main, [
-            "generate", "pyproject-uv",
-            "--context", str(bad_ctx),
-            *templates_arg,
-        ])
+        result = runner.invoke(
+            main,
+            [
+                "generate",
+                "pyproject-uv",
+                "--context",
+                str(bad_ctx),
+                *templates_arg,
+            ],
+        )
         assert result.exit_code == 1
 
     def test_generate_with_nested_context_format(
@@ -475,18 +535,27 @@ class TestGenerateArtifact:
         path is exercised when context is present.
         """
         ctx = tmp_path / "context.json"
-        ctx.write_text(json.dumps({
-            "user_request": "Build a CLI tool",
-            "facts": {"uses_click": True},
-        }))
+        ctx.write_text(
+            json.dumps(
+                {
+                    "user_request": "Build a CLI tool",
+                    "facts": {"uses_click": True},
+                }
+            )
+        )
 
         # Use nonexistent template to avoid LLM call but still
         # exercise the context parsing path.
-        result = runner.invoke(main, [
-            "generate", "nonexistent",
-            "--context", str(ctx),
-            *templates_arg,
-        ])
+        result = runner.invoke(
+            main,
+            [
+                "generate",
+                "nonexistent",
+                "--context",
+                str(ctx),
+                *templates_arg,
+            ],
+        )
         assert result.exit_code == 1
 
 
@@ -542,11 +611,16 @@ class TestRenderEdgeCases:
         unless model_config says 'extra'='forbid'.)"""
         # Our schema uses model_validate which has strict defaults.
         # Extra fields should still render fine.
-        result = runner.invoke(main, [
-            "render", "pyproject-uv",
-            "--input", str(fastapi_input_file),
-            *templates_arg,
-        ])
+        result = runner.invoke(
+            main,
+            [
+                "render",
+                "pyproject-uv",
+                "--input",
+                str(fastapi_input_file),
+                *templates_arg,
+            ],
+        )
         assert result.exit_code == 0
 
     def test_render_two_different_models_same_template(
@@ -558,24 +632,28 @@ class TestRenderEdgeCases:
         """Two renders with different models produce different output."""
         # First model
         m1 = tmp_path / "m1.json"
-        m1.write_text(json.dumps({
-            "project_name": "project-a",
-            "python_version": "3.12",
-        }))
+        m1.write_text(
+            json.dumps(
+                {
+                    "project_name": "project-a",
+                    "python_version": "3.12",
+                }
+            )
+        )
 
         # Second model
         m2 = tmp_path / "m2.json"
-        m2.write_text(json.dumps({
-            "project_name": "project-b",
-            "python_version": "3.11",
-        }))
+        m2.write_text(
+            json.dumps(
+                {
+                    "project_name": "project-b",
+                    "python_version": "3.11",
+                }
+            )
+        )
 
-        r1 = runner.invoke(main, [
-            "render", "pyproject-uv", "--input", str(m1), *templates_arg
-        ])
-        r2 = runner.invoke(main, [
-            "render", "pyproject-uv", "--input", str(m2), *templates_arg
-        ])
+        r1 = runner.invoke(main, ["render", "pyproject-uv", "--input", str(m1), *templates_arg])
+        r2 = runner.invoke(main, ["render", "pyproject-uv", "--input", str(m2), *templates_arg])
 
         assert r1.exit_code == 0
         assert r2.exit_code == 0

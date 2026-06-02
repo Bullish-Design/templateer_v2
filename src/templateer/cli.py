@@ -112,7 +112,8 @@ def main() -> None:
 
 @main.command("list")
 @click.option(
-    "--paths", "-p",
+    "--paths",
+    "-p",
     multiple=True,
     help="Additional template search paths (replaces defaults).",
 )
@@ -130,16 +131,15 @@ def list_templates(paths: tuple[str, ...]) -> None:
         click.echo(f"    {template.description}")
         click.echo(f"    Output: {template.output_kind}")
         if template.trigger_paths:
-            click.echo(
-                f"    Generates: {', '.join(sorted(template.trigger_paths))}"
-            )
+            click.echo(f"    Generates: {', '.join(sorted(template.trigger_paths))}")
         click.echo()
 
 
 @main.command("describe")
 @click.argument("template_name")
 @click.option(
-    "--paths", "-p",
+    "--paths",
+    "-p",
     multiple=True,
     help="Additional template search paths (replaces defaults).",
 )
@@ -166,7 +166,8 @@ def describe_template(template_name: str, paths: tuple[str, ...]) -> None:
 @main.command("schema")
 @click.argument("template_name")
 @click.option(
-    "--paths", "-p",
+    "--paths",
+    "-p",
     multiple=True,
     help="Additional template search paths (replaces defaults).",
 )
@@ -187,19 +188,22 @@ def show_schema(template_name: str, paths: tuple[str, ...]) -> None:
 @main.command("render")
 @click.argument("template_name")
 @click.option(
-    "--input", "-i",
+    "--input",
+    "-i",
     "input_file",
     required=True,
     help="JSON file with validated Pydantic model data.",
 )
 @click.option(
-    "--output", "-o",
+    "--output",
+    "-o",
     "output_file",
     default=None,
     help="Output file (stdout if not given).",
 )
 @click.option(
-    "--paths", "-p",
+    "--paths",
+    "-p",
     multiple=True,
     help="Additional template search paths (replaces defaults).",
 )
@@ -263,31 +267,36 @@ def render_from_model(
 @main.command("generate")
 @click.argument("template_name")
 @click.option(
-    "--context", "-c",
+    "--context",
+    "-c",
     "context_file",
     default=None,
     help="JSON file with project facts context.",
 )
 @click.option(
-    "--request", "-r",
+    "--request",
+    "-r",
     "user_request",
     default=None,
     help="User request description.",
 )
 @click.option(
-    "--output", "-o",
+    "--output",
+    "-o",
     "output_file",
     default=None,
     help="Output file for the generated artifact.",
 )
 @click.option(
-    "--model", "-m",
+    "--model",
+    "-m",
     "model_name",
     default="openai:gpt-4.1-mini",
     help="LLM model to use.",
 )
 @click.option(
-    "--paths", "-p",
+    "--paths",
+    "-p",
     multiple=True,
     help="Additional template search paths (replaces defaults).",
 )
@@ -369,13 +378,15 @@ def generate_artifact(
 @main.command("validate")
 @click.argument("template_name")
 @click.option(
-    "--input", "-i",
+    "--input",
+    "-i",
     "input_file",
     required=True,
     help="JSON file with model data to validate and render.",
 )
 @click.option(
-    "--paths", "-p",
+    "--paths",
+    "-p",
     multiple=True,
     help="Additional template search paths (replaces defaults).",
 )

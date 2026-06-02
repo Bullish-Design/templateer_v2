@@ -197,9 +197,7 @@ class TemplateRegistry:
         except ModelGenerationError:
             raise
         except Exception as e:
-            raise ModelGenerationError(
-                f"Unexpected error during model generation: {e}"
-            ) from e
+            raise ModelGenerationError(f"Unexpected error during model generation: {e}") from e
 
         # ── 3. Render artifact ───────────────────────────────────────
         try:
@@ -207,21 +205,16 @@ class TemplateRegistry:
         except RenderError:
             raise
         except Exception as e:
-            raise RenderError(
-                f"Unexpected error during rendering: {e}"
-            ) from e
+            raise RenderError(f"Unexpected error during rendering: {e}") from e
 
         # ── 4. Validate output ───────────────────────────────────────
         output_language = template.metadata.outputs[0].language
-        output_validators = [
-            v.model_dump() for v in template.metadata.validators
-        ]
+        output_validators = [v.model_dump() for v in template.metadata.validators]
 
         errors = validate_output(rendered, output_language, output_validators)
         if errors:
             raise RuntimeError(
-                f"Output validation failed for '{template_name}': "
-                + "; ".join(errors)
+                f"Output validation failed for '{template_name}': " + "; ".join(errors)
             )
 
         return TemplateGenerationResult(

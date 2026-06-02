@@ -5,7 +5,6 @@ artifacts in TOML, JSON, YAML, and Python, and that custom validators
 (parse and command kinds) work as expected.
 """
 
-
 from templateer.validators import validate_output
 
 # ---------------------------------------------------------------------------
@@ -70,7 +69,7 @@ class TestJsonValidation:
 
     def test_validate_valid_json_array(self) -> None:
         """Valid JSON array passes validation."""
-        errors = validate_output('[1, 2, 3]', "json")
+        errors = validate_output("[1, 2, 3]", "json")
         assert errors == []
 
     def test_validate_valid_json_nested(self) -> None:

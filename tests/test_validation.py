@@ -27,9 +27,7 @@ def pyproject_template() -> Template:
 @pytest.fixture
 def fastapi_input() -> dict:
     """Load the FastAPI example input fixture."""
-    return json.loads(
-        (Path("templates/pyproject-uv/examples/fastapi.input.json")).read_text()
-    )
+    return json.loads((Path("templates/pyproject-uv/examples/fastapi.input.json")).read_text())
 
 
 # ---------------------------------------------------------------------------
@@ -63,9 +61,7 @@ def test_schema_class_has_fields(pyproject_template: Template) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_valid_model_validates(
-    pyproject_template: Template, fastapi_input: dict
-) -> None:
+def test_valid_model_validates(pyproject_template: Template, fastapi_input: dict) -> None:
     """A valid input dict validates successfully against the schema."""
     cls = pyproject_template.get_schema_class()
     instance, errors = validate_model_instance(cls, fastapi_input)
@@ -100,7 +96,8 @@ def test_invalid_model_reports_multiple_errors(
     """Multiple validation issues are all reported."""
     cls = pyproject_template.get_schema_class()
     instance, errors = validate_model_instance(
-        cls, {"project_name": "test"}  # missing python_version (required)
+        cls,
+        {"project_name": "test"},  # missing python_version (required)
     )
     assert instance is None
     assert len(errors) >= 1

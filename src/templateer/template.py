@@ -36,9 +36,7 @@ class Template:
         self._metadata_path = root / "metadata.yml"
 
         if not self._metadata_path.exists():
-            raise TemplateLoadError(
-                f"metadata.yml not found in {root}"
-            )
+            raise TemplateLoadError(f"metadata.yml not found in {root}")
 
         try:
             raw = yaml.safe_load(self._metadata_path.read_text())
@@ -58,8 +56,7 @@ class Template:
         # Validate that metadata name matches directory name
         if self.metadata.name != root.name:
             raise TemplateLoadError(
-                f"Template name '{self.metadata.name}' does not match "
-                f"directory name '{root.name}'"
+                f"Template name '{self.metadata.name}' does not match directory name '{root.name}'"
             )
 
         # Cache for lazily-loaded resources
@@ -147,9 +144,7 @@ class Template:
 
         cls = getattr(module, class_name)
         if not isinstance(cls, type) or not issubclass(cls, BaseModel):
-            raise TemplateLoadError(
-                f"'{class_name}' is not a Pydantic BaseModel subclass"
-            )
+            raise TemplateLoadError(f"'{class_name}' is not a Pydantic BaseModel subclass")
 
         self._schema_class_cache = cls
         return cls

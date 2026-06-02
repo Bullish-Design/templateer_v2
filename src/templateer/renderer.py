@@ -64,9 +64,7 @@ def render_template(
     try:
         result = env.render_str(template_source, **render_context)
     except Exception as e:
-        raise RenderError(
-            f"Failed to render template '{template_path.name}': {e}"
-        ) from e
+        raise RenderError(f"Failed to render template '{template_path.name}': {e}") from e
 
     # IMPORTANT: The render context is not exposed beyond this function.
     # The template cannot access anything except what was in the model.

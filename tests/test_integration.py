@@ -29,19 +29,13 @@ def catalog():
 @pytest.fixture
 def fastapi_input_data():
     """Load the FastAPI example input fixture."""
-    return json.loads(
-        (Path("templates/pyproject-uv/examples/fastapi.input.json")).read_text()
-    )
+    return json.loads((Path("templates/pyproject-uv/examples/fastapi.input.json")).read_text())
 
 
 @pytest.fixture
 def fastapi_expected_output():
     """Load the FastAPI expected output fixture."""
-    return (
-        Path("templates/pyproject-uv/examples/fastapi.output.toml")
-        .read_text()
-        .strip()
-    )
+    return Path("templates/pyproject-uv/examples/fastapi.output.toml").read_text().strip()
 
 
 # ── Structural validation of all templates in catalog ──
@@ -78,9 +72,7 @@ def test_all_templates_load_and_have_valid_schemas(catalog):
 
         # Renderer file is readable
         renderer_content = renderer_path.read_text()
-        assert len(renderer_content) > 0, (
-            f"Template '{template.name}' renderer file is empty"
-        )
+        assert len(renderer_content) > 0, f"Template '{template.name}' renderer file is empty"
 
 
 # ── Fixture roundtrip verification ──
@@ -338,9 +330,7 @@ def test_renderer_receives_only_model_data(catalog, fastapi_input_data):
 
     # All keys in the dump are Pydantic field names
     for key in dumped:
-        assert key in cls.model_fields, (
-            f"Unexpected key '{key}' in model dump"
-        )
+        assert key in cls.model_fields, f"Unexpected key '{key}' in model dump"
 
     # The render should work with only these keys
     rendered = template.render(model)

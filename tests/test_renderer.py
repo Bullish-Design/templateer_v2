@@ -36,10 +36,7 @@ def test_render_from_valid_model(pyproject_template, fastapi_model):
 
 def test_render_matches_expected_output(pyproject_template, fastapi_model):
     """Rendered output matches the example output fixture exactly."""
-    expected_output = (
-        Path("templates/pyproject-uv/examples/fastapi.output.toml")
-        .read_text()
-    )
+    expected_output = Path("templates/pyproject-uv/examples/fastapi.output.toml").read_text()
     rendered = pyproject_template.render(fastapi_model)
     assert rendered.strip() == expected_output.strip()
 
@@ -102,9 +99,7 @@ def test_strict_mode_raises_on_undefined_variable(tmp_path):
     """In strict mode, referencing undefined variables raises RenderError."""
     template_file = tmp_path / "template.j2"
     template_file.write_text("Hello {{ undefined_var }}!")
-    with pytest.raises(
-        RenderError, match="undefined value"
-    ):
+    with pytest.raises(RenderError, match="undefined value"):
         render_template(template_file, {"name": "World"}, strict=True)
 
 
@@ -150,14 +145,12 @@ def test_render_respects_model_dump_json_mode(pyproject_template):
     assert isinstance(dumped["python_version"], str)
 
     rendered = pyproject_template.render(model)
-    assert '[project]' in rendered
+    assert "[project]" in rendered
 
 
 def test_render_template_directly(pyproject_template, fastapi_model):
     """render_template function works directly with a Template instance."""
-    template_path = pyproject_template.resolve_path(
-        pyproject_template.metadata.renderer.file
-    )
+    template_path = pyproject_template.resolve_path(pyproject_template.metadata.renderer.file)
     rendered = render_template(
         template_path,
         fastapi_model,

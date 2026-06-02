@@ -34,9 +34,7 @@ def registry() -> TemplateRegistry:
 @pytest.fixture
 def fastapi_input() -> dict:
     """The FastAPI example input fixture as a dict."""
-    return json.loads(
-        (Path("templates/pyproject-uv/examples/fastapi.input.json")).read_text()
-    )
+    return json.loads((Path("templates/pyproject-uv/examples/fastapi.input.json")).read_text())
 
 
 # ---------------------------------------------------------------------------
@@ -148,23 +146,17 @@ class TestRenderFromModel:
         assert "[project]" in rendered
         assert "fastapi-app" in rendered
 
-    def test_render_from_model_matches_fixture(
-        self, registry: TemplateRegistry
-    ) -> None:
+    def test_render_from_model_matches_fixture(self, registry: TemplateRegistry) -> None:
         """render_from_model output matches the expected output fixture."""
         input_data = json.loads(
             (Path("templates/pyproject-uv/examples/fastapi.input.json")).read_text()
         )
-        expected = (
-            Path("templates/pyproject-uv/examples/fastapi.output.toml")
-        ).read_text()
+        expected = (Path("templates/pyproject-uv/examples/fastapi.output.toml")).read_text()
 
         rendered = registry.render_from_model("pyproject-uv", input_data)
         assert rendered.strip() == expected.strip()
 
-    def test_render_from_model_minimal_data(
-        self, registry: TemplateRegistry
-    ) -> None:
+    def test_render_from_model_minimal_data(self, registry: TemplateRegistry) -> None:
         """render_from_model works with minimal model data (only required fields)."""
         minimal = {
             "project_name": "minimal-project",
@@ -174,16 +166,12 @@ class TestRenderFromModel:
         assert "minimal-project" in rendered
         assert "[project]" in rendered
 
-    def test_render_from_model_unknown_template(
-        self, registry: TemplateRegistry
-    ) -> None:
+    def test_render_from_model_unknown_template(self, registry: TemplateRegistry) -> None:
         """render_from_model raises on unknown template name."""
         with pytest.raises(TemplateNotFoundError):
             registry.render_from_model("nonexistent", {})
 
-    def test_render_from_model_invalid_data(
-        self, registry: TemplateRegistry
-    ) -> None:
+    def test_render_from_model_invalid_data(self, registry: TemplateRegistry) -> None:
         """render_from_model raises ValidationError on invalid model data."""
         with pytest.raises(ValidationError):
             registry.render_from_model("pyproject-uv", {})
@@ -236,9 +224,7 @@ class TestValidateArtifact:
 
     def test_validate_valid_fixture_output(self, registry: TemplateRegistry) -> None:
         """The FastAPI output fixture passes validation."""
-        output = (
-            Path("templates/pyproject-uv/examples/fastapi.output.toml")
-        ).read_text()
+        output = (Path("templates/pyproject-uv/examples/fastapi.output.toml")).read_text()
         errors = registry.validate_artifact("pyproject-uv", output)
         assert errors == []
 
@@ -257,16 +243,11 @@ class TestGenerateModel:
     """Tests for the generate_model method (LLM required)."""
 
     @has_api_key
-    def test_generate_model_produces_pydantic_instance(
-        self, registry: TemplateRegistry
-    ) -> None:
+    def test_generate_model_produces_pydantic_instance(self, registry: TemplateRegistry) -> None:
         """generate_model returns a validated Pydantic model."""
         model = registry.generate_model(
             template_name="pyproject-uv",
-            user_request=(
-                "Generate config for a minimal Python project "
-                "using uv with pytest."
-            ),
+            user_request=("Generate config for a minimal Python project using uv with pytest."),
         )
         from pydantic import BaseModel
 
@@ -275,9 +256,7 @@ class TestGenerateModel:
         assert len(model.project_name) > 0  # type: ignore[attr-defined]
 
     @has_api_key
-    def test_generate_model_with_context(
-        self, registry: TemplateRegistry
-    ) -> None:
+    def test_generate_model_with_context(self, registry: TemplateRegistry) -> None:
         """generate_model accepts and uses project context."""
         model = registry.generate_model(
             template_name="pyproject-uv",
@@ -296,9 +275,7 @@ class TestGenerate:
     """Tests for the generate method (full pipeline, LLM required)."""
 
     @has_api_key
-    def test_generate_returns_result(
-        self, registry: TemplateRegistry
-    ) -> None:
+    def test_generate_returns_result(self, registry: TemplateRegistry) -> None:
         """generate returns a TemplateGenerationResult."""
         result = registry.generate(
             template_name="pyproject-uv",
@@ -315,9 +292,7 @@ class TestGenerate:
         assert "[project]" in result.rendered
 
     @has_api_key
-    def test_generate_result_model_is_dict(
-        self, registry: TemplateRegistry
-    ) -> None:
+    def test_generate_result_model_is_dict(self, registry: TemplateRegistry) -> None:
         """generate result.model is a dict matching the schema."""
         result = registry.generate(
             template_name="pyproject-uv",
@@ -335,24 +310,18 @@ class TestGenerate:
 class TestErrorHandling:
     """Tests for error handling across API methods."""
 
-    def test_get_template_nonexistent_raises_typed_error(
-        self, registry: TemplateRegistry
-    ) -> None:
+    def test_get_template_nonexistent_raises_typed_error(self, registry: TemplateRegistry) -> None:
         """get_template raises TemplateNotFoundError (not a generic exception)."""
         with pytest.raises(TemplateNotFoundError) as exc_info:
             registry.get_template("nonexistent-template-abc")
         assert "nonexistent-template-abc" in str(exc_info.value)
 
-    def test_get_template_empty_string(
-        self, registry: TemplateRegistry
-    ) -> None:
+    def test_get_template_empty_string(self, registry: TemplateRegistry) -> None:
         """get_template with empty string raises TemplateNotFoundError."""
         with pytest.raises(TemplateNotFoundError):
             registry.get_template("")
 
-    def test_get_template_whitespace(
-        self, registry: TemplateRegistry
-    ) -> None:
+    def test_get_template_whitespace(self, registry: TemplateRegistry) -> None:
         """get_template with whitespace-only name raises."""
         with pytest.raises(TemplateNotFoundError):
             registry.get_template("   ")
@@ -380,9 +349,7 @@ class TestErrorHandling:
 class TestIntegration:
     """Integration tests that exercise multiple API methods together."""
 
-    def test_render_then_validate(
-        self, registry: TemplateRegistry, fastapi_input: dict
-    ) -> None:
+    def test_render_then_validate(self, registry: TemplateRegistry, fastapi_input: dict) -> None:
         """Artifact produced by render_from_model passes validate_artifact."""
         rendered = registry.render_from_model("pyproject-uv", fastapi_input)
         errors = registry.validate_artifact("pyproject-uv", rendered)
@@ -399,16 +366,12 @@ class TestIntegration:
         rendered = pyproject.render(model)
         assert "[project]" in rendered
 
-    def test_fastapi_fixture_full_roundtrip(
-        self, registry: TemplateRegistry
-    ) -> None:
+    def test_fastapi_fixture_full_roundtrip(self, registry: TemplateRegistry) -> None:
         """FastAPI fixture: input → render → validate → matches expected output."""
         input_data = json.loads(
             (Path("templates/pyproject-uv/examples/fastapi.input.json")).read_text()
         )
-        expected = (
-            Path("templates/pyproject-uv/examples/fastapi.output.toml")
-        ).read_text()
+        expected = (Path("templates/pyproject-uv/examples/fastapi.output.toml")).read_text()
 
         rendered = registry.render_from_model("pyproject-uv", input_data)
         assert rendered.strip() == expected.strip()

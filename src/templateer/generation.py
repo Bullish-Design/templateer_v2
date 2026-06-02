@@ -79,12 +79,8 @@ class Generation(BaseModel):
       - If status is FAILED, failure_reason must be set.
     """
 
-    requested_path: str = Field(
-        description="The artifact path requested (e.g. 'pyproject.toml')"
-    )
-    template_name: str = Field(
-        description="Name of the template to use (exact directory name)"
-    )
+    requested_path: str = Field(description="The artifact path requested (e.g. 'pyproject.toml')")
+    template_name: str = Field(description="Name of the template to use (exact directory name)")
 
     status: GenerationStatus = Field(
         default=GenerationStatus.SUBMITTED,
@@ -123,10 +119,7 @@ class Generation(BaseModel):
         A generation is retryable when it has failed and the retry
         count has not yet reached the limit (3 by default).
         """
-        return (
-            self.status == GenerationStatus.FAILED
-            and self.retry_count < 3
-        )
+        return self.status == GenerationStatus.FAILED and self.retry_count < 3
 
     @property
     def is_done(self) -> bool:

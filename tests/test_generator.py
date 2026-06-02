@@ -117,9 +117,7 @@ class TestGenerateModelMocked:
     # Success paths
     # ------------------------------------------------------------------
 
-    def test_success_returns_validated_model(
-        self, pyproject_template: Template
-    ) -> None:
+    def test_success_returns_validated_model(self, pyproject_template: Template) -> None:
         """When Agent returns a valid BaseModel, generate_model returns it."""
         schema_cls = pyproject_template.get_schema_class()
         valid_instance = schema_cls(**self._valid_model_dict())
@@ -143,9 +141,7 @@ class TestGenerateModelMocked:
         assert dumped["project_name"] == "mock-project"
         assert msgs == []
 
-    def test_success_pass_context_to_agent(
-        self, pyproject_template: Template
-    ) -> None:
+    def test_success_pass_context_to_agent(self, pyproject_template: Template) -> None:
         """Agent.run_sync receives a context string that combines the
         user request with any project facts."""
         schema_cls = pyproject_template.get_schema_class()
@@ -178,9 +174,7 @@ class TestGenerateModelMocked:
     # None output
     # ------------------------------------------------------------------
 
-    def test_agent_returns_none_raises(
-        self, pyproject_template: Template
-    ) -> None:
+    def test_agent_returns_none_raises(self, pyproject_template: Template) -> None:
         """If Agent.run_sync returns output=None, a ModelGenerationError
         is raised."""
         with patch("templateer.generator.Agent") as mock_agent_cls:
@@ -195,9 +189,7 @@ class TestGenerateModelMocked:
     # run_sync raises
     # ------------------------------------------------------------------
 
-    def test_agent_run_sync_raises(
-        self, pyproject_template: Template
-    ) -> None:
+    def test_agent_run_sync_raises(self, pyproject_template: Template) -> None:
         """If Agent.run_sync raises, the exception is wrapped in a
         ModelGenerationError."""
         with patch("templateer.generator.Agent") as mock_agent_cls:
@@ -212,9 +204,7 @@ class TestGenerateModelMocked:
     # Fallback: dict output
     # ------------------------------------------------------------------
 
-    def test_agent_returns_dict_validates_and_wraps(
-        self, pyproject_template: Template
-    ) -> None:
+    def test_agent_returns_dict_validates_and_wraps(self, pyproject_template: Template) -> None:
         """If Agent returns a plain dict (not a BaseModel), the fallback
         path validates it and returns the constructed model."""
         valid_dict = self._valid_model_dict()
@@ -235,9 +225,7 @@ class TestGenerateModelMocked:
         assert model.project_name == "mock-project"
         assert model.python_version == "3.12"
 
-    def test_agent_returns_invalid_dict_raises(
-        self, pyproject_template: Template
-    ) -> None:
+    def test_agent_returns_invalid_dict_raises(self, pyproject_template: Template) -> None:
         """If Agent returns a dict that fails validation, raise
         ModelGenerationError."""
         invalid_dict = {"project_name": 12345}  # wrong type
@@ -247,39 +235,29 @@ class TestGenerateModelMocked:
             mock_agent.run_sync.return_value = self._make_mock_result(invalid_dict)
             mock_agent_cls.return_value = mock_agent
 
-            with pytest.raises(
-                ModelGenerationError, match="Model validation failed"
-            ):
+            with pytest.raises(ModelGenerationError, match="Model validation failed"):
                 generate_model(pyproject_template, user_request="test")
 
     # ------------------------------------------------------------------
     # Unexpected output type
     # ------------------------------------------------------------------
 
-    def test_agent_returns_unexpected_type_raises(
-        self, pyproject_template: Template
-    ) -> None:
+    def test_agent_returns_unexpected_type_raises(self, pyproject_template: Template) -> None:
         """If Agent returns e.g. a plain string, raise ModelGenerationError
         with the unexpected type mentioned."""
         with patch("templateer.generator.Agent") as mock_agent_cls:
             mock_agent = MagicMock()
-            mock_agent.run_sync.return_value = self._make_mock_result(
-                "just a string"
-            )
+            mock_agent.run_sync.return_value = self._make_mock_result("just a string")
             mock_agent_cls.return_value = mock_agent
 
-            with pytest.raises(
-                ModelGenerationError, match="unexpected output type"
-            ):
+            with pytest.raises(ModelGenerationError, match="unexpected output type"):
                 generate_model(pyproject_template, user_request="test")
 
     # ------------------------------------------------------------------
     # Defensive re-validation catches mismatches
     # ------------------------------------------------------------------
 
-    def test_defensive_revalidation_catches_bad_model(
-        self, pyproject_template: Template
-    ) -> None:
+    def test_defensive_revalidation_catches_bad_model(self, pyproject_template: Template) -> None:
         """Even when Agent returns a BaseModel instance, defensive
         re-validation via model_dump → validate_model_instance will
         catch schema mismatches.  We force this by mocking
@@ -289,18 +267,14 @@ class TestGenerateModelMocked:
 
         with patch("templateer.generator.Agent") as mock_agent_cls:
             mock_agent = MagicMock()
-            mock_agent.run_sync.return_value = self._make_mock_result(
-                valid_instance
-            )
+            mock_agent.run_sync.return_value = self._make_mock_result(valid_instance)
             mock_agent_cls.return_value = mock_agent
 
             with patch(
                 "templateer.generator.validate_model_instance",
                 return_value=(None, ["field_x is required"]),
             ):
-                with pytest.raises(
-                    ModelGenerationError, match="Post-generation"
-                ):
+                with pytest.raises(ModelGenerationError, match="Post-generation"):
                     generate_model(pyproject_template, user_request="test")
 
 
@@ -355,9 +329,7 @@ class TestGenerateModelLLM:
         )
         assert model is not None
         dep_names = [d.name.lower() for d in model.dependencies]
-        assert "fastapi" in dep_names, (
-            f"Expected 'fastapi' in dependencies, got: {dep_names}"
-        )
+        assert "fastapi" in dep_names, f"Expected 'fastapi' in dependencies, got: {dep_names}"
 
     def test_generate_model_pytest_dev_dependency(self, pyproject_template):
         """Projects with testing should include pytest in dev dependencies."""
@@ -368,9 +340,7 @@ class TestGenerateModelLLM:
         )
         assert model is not None
         dev_names = [d.name.lower() for d in model.dev_dependencies]
-        assert "pytest" in dev_names, (
-            f"Expected 'pytest' in dev_dependencies, got: {dev_names}"
-        )
+        assert "pytest" in dev_names, f"Expected 'pytest' in dev_dependencies, got: {dev_names}"
 
     def test_generate_model_returns_validated_instance(self, pyproject_template):
         """The returned model is a validated PyprojectUvModel instance."""

@@ -123,9 +123,7 @@ def run_pipeline(
     # Step 4 — Validate the rendered output
     # ----------------------------------------------------------------
     output_language = template.metadata.outputs[0].language
-    output_validators = [
-        v.model_dump() for v in template.metadata.validators
-    ]
+    output_validators = [v.model_dump() for v in template.metadata.validators]
 
     errors = validate_output(rendered, output_language, output_validators)
 
@@ -174,8 +172,7 @@ def retry_generation(
     """
     if not gen.can_retry:
         raise ValueError(
-            "Generation cannot be retried: "
-            f"status={gen.status.value}, retries={gen.retry_count}"
+            f"Generation cannot be retried: status={gen.status.value}, retries={gen.retry_count}"
         )
 
     next_attempt = gen.retry_count + 1
