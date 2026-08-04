@@ -7,12 +7,13 @@ LLM-dependent tests are skipped unless OPENAI_API_KEY is set.
 import json
 import os
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 from pydantic import ValidationError
 
 from templateer.api import TemplateRegistry
-from templateer.models import TemplateGenerationResult
+from templateer.result import GenerationResult
 from templateer.template import TemplateNotFoundError
 
 # ---------------------------------------------------------------------------
@@ -235,48 +236,34 @@ class TestValidateArtifact:
 
 
 # ---------------------------------------------------------------------------
-# Model-only generation (LLM required)
-# ---------------------------------------------------------------------------
-
-
-class TestGenerateModel:
-    """Tests for the generate_model method (LLM required)."""
-
-    @has_api_key
-    def test_generate_model_produces_pydantic_instance(self, registry: TemplateRegistry) -> None:
-        """generate_model returns a validated Pydantic model."""
-        model = registry.generate_model(
-            template_name="pyproject-uv",
-            user_request=("Generate config for a minimal Python project using uv with pytest."),
-        )
-        from pydantic import BaseModel
-
-        assert isinstance(model, BaseModel)
-        assert model.project_name is not None  # type: ignore[attr-defined]
-        assert len(model.project_name) > 0  # type: ignore[attr-defined]
-
-    @has_api_key
-    def test_generate_model_with_context(self, registry: TemplateRegistry) -> None:
-        """generate_model accepts and uses project context."""
-        model = registry.generate_model(
-            template_name="pyproject-uv",
-            user_request="Generate a FastAPI project pyproject.toml",
-            context={"uses_fastapi": True, "python_version": "3.12"},
-        )
-        assert model.project_name is not None  # type: ignore[attr-defined]
-
-
-# ---------------------------------------------------------------------------
 # Full generation (LLM required)
 # ---------------------------------------------------------------------------
 
 
+def _valid_model():
+    """Build a valid PyprojectUvModel from the bundled fixture."""
+    from templateer.template import Template
+
+    data = json.loads(Path("templates/pyproject-uv/examples/fastapi.input.json").read_text())
+    return Template(Path("templates/pyproject-uv")).get_schema_class()(**data)
+
+
 class TestGenerate:
-    """Tests for the generate method (full pipeline, LLM required)."""
+    """Tests for the generate method (full pipeline)."""
+
+    def test_generate_uses_the_pipeline(self, registry: TemplateRegistry) -> None:
+        """api.generate delegates rather than re-deriving. Currently ZERO
+        non-LLM coverage: all four existing tests are @has_api_key gated."""
+        with patch("templateer.pipeline.generate_model",
+                   lambda *a, **k: _valid_model()):
+            result = registry.generate("pyproject-uv", "make a thing")
+        assert result.succeeded
+        assert result.artifact is not None
+        assert "[project]" in result.artifact
 
     @has_api_key
     def test_generate_returns_result(self, registry: TemplateRegistry) -> None:
-        """generate returns a TemplateGenerationResult."""
+        """generate returns a GenerationResult."""
         result = registry.generate(
             template_name="pyproject-uv",
             user_request=(
@@ -285,11 +272,12 @@ class TestGenerate:
             ),
             context={"python_version": "3.12"},
         )
-        assert isinstance(result, TemplateGenerationResult)
-        assert result.template_name == "pyproject-uv"
+        assert isinstance(result, GenerationResult)
+        assert result.succeeded
+        assert result.artifact is not None
         assert isinstance(result.model, dict)
-        assert len(result.rendered) > 0
-        assert "[project]" in result.rendered
+        assert len(result.artifact) > 0
+        assert "[project]" in result.artifact
 
     @has_api_key
     def test_generate_result_model_is_dict(self, registry: TemplateRegistry) -> None:
@@ -298,6 +286,8 @@ class TestGenerate:
             template_name="pyproject-uv",
             user_request="Generate a pyproject.toml for a minimal Python project.",
         )
+        assert result.succeeded
+        assert result.artifact is not None
         assert isinstance(result.model, dict)
         assert "project_name" in result.model
 

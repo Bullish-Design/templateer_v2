@@ -12,8 +12,8 @@ from pathlib import Path
 import pytest
 
 from templateer.catalog import TemplateCatalog
-from templateer.generation import GenerationStatus
-from templateer.pipeline import run_pipeline
+from templateer.pipeline import generate
+from templateer.result import GenerationRequest
 from templateer.template import Template
 from templateer.validators import validate_output
 
@@ -139,7 +139,7 @@ def test_fastapi_full_pipeline_without_llm(catalog, fastapi_input_data, fastapi_
     assert rendered.strip() == fastapi_expected_output
 
     # Output validation
-    errors = validate_output(rendered, "toml")
+    errors, _ = validate_output(rendered, "toml")
     assert errors == [], f"Output validation failed: {errors}"
 
 
@@ -157,7 +157,7 @@ def test_minimal_model_roundtrip(catalog):
     rendered = template.render(model)
     assert "minimal-roundtrip" in rendered
 
-    errors = validate_output(rendered, "toml")
+    errors, _ = validate_output(rendered, "toml")
     assert errors == []
 
 
@@ -202,7 +202,7 @@ def test_full_model_roundtrip(catalog):
     assert "[tool.pytest.ini_options]" in rendered
     assert "line-length = 100" in rendered
 
-    errors = validate_output(rendered, "toml")
+    errors, _ = validate_output(rendered, "toml")
     assert errors == []
 
 
@@ -223,7 +223,7 @@ def test_empty_dependencies_roundtrip(catalog):
     assert "no-deps" in rendered
     assert "[dependency-groups]" not in rendered
 
-    errors = validate_output(rendered, "toml")
+    errors, _ = validate_output(rendered, "toml")
     assert errors == []
 
 
@@ -238,7 +238,7 @@ def test_special_characters_in_name(catalog):
     rendered = template.render(model)
     assert "my-awesome-project" in rendered
 
-    errors = validate_output(rendered, "toml")
+    errors, _ = validate_output(rendered, "toml")
     assert errors == []
 
 
@@ -256,7 +256,7 @@ def test_dependency_with_extras(catalog):
     rendered = template.render(model)
     assert "pydantic[email]>=2.0" in rendered
 
-    errors = validate_output(rendered, "toml")
+    errors, _ = validate_output(rendered, "toml")
     assert errors == []
 
 
@@ -264,17 +264,13 @@ def test_dependency_with_extras(catalog):
 
 
 def test_pipeline_end_to_end_without_llm(catalog):
-    """Full pipeline runs from template resolution through output validation."""
-    # The pipeline uses the LLM by default, but we can test the
-    # non-LLM path by verifying the pipeline fails cleanly when no
-    # LLM is available, and testing the individual components.
-    gen = run_pipeline(
-        catalog=catalog,
+    """Full pipeline returns a coherent failure for an unknown template."""
+    result = generate(catalog, GenerationRequest(
         template_name="nonexistent",
         user_request="test",
-    )
-    assert gen.is_done
-    assert gen.status == GenerationStatus.FAILED
+    ))
+    assert not result.succeeded
+    assert result.failure_reason is not None
 
 
 def test_multiple_render_same_template_deterministic(catalog):
@@ -312,8 +308,20 @@ def test_template_catalog_integration_end_to_end(
     assert rendered.strip() == fastapi_expected_output
 
     # Step 5: Output validation
-    errors = validate_output(rendered, "toml")
+    errors, _ = validate_output(rendered, "toml")
     assert errors == []
+
+
+# ── Injection audit (Phase 8: templateer check) ──
+
+
+@pytest.mark.parametrize("name", [p.name for p in sorted(Path("templates").iterdir())
+                                  if (p / "metadata.yml").exists()])
+def test_bundled_template_resists_injection(name):
+    """Every bundled template passes the escaping audit — 0 findings."""
+    from templateer.audit import audit_template
+
+    assert audit_template(Template(Path("templates") / name)) == []
 
 
 # ── Invariant checks ──
@@ -353,11 +361,11 @@ def test_output_validator_accepts_valid_fixture(catalog):
             continue
 
         t = Template(template_dir)
-        output_language = t.metadata.outputs[0].language
+        output_language = t.metadata.output.language
 
         for output_file in sorted(examples_dir.glob("*.output.*")):
             artifact = output_file.read_text()
-            errors = validate_output(artifact, output_language)
+            errors, _ = validate_output(artifact, output_language)
             assert errors == [], (
                 f"Output validation failed for {output_file} "
                 f"in template {template_dir.name}: {errors}"

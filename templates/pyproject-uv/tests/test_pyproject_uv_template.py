@@ -59,8 +59,8 @@ def test_metadata_parses():
     """Metadata YAML parses with expected values."""
     t = Template(TEMPLATE_DIR)
     assert t.name == "pyproject-uv"
-    assert t.metadata.outputs[0].language == "toml"
-    assert t.metadata.outputs[0].path == "pyproject.toml"
+    assert t.metadata.output.language == "toml"
+    assert t.metadata.output.path == "pyproject.toml"
 
 
 def test_fastapi_fixture_renders_correctly():
@@ -106,7 +106,7 @@ def test_minimal_model_is_valid_toml():
 
     from templateer.validators import validate_output
 
-    errors = validate_output(rendered, "toml")
+    errors, _ = validate_output(rendered, "toml")
     assert errors == [], f"TOML validation failed: {errors}"
 
 
@@ -123,7 +123,7 @@ def test_full_fastapi_model_is_valid_toml():
 
     from templateer.validators import validate_output
 
-    errors = validate_output(rendered, "toml")
+    errors, _ = validate_output(rendered, "toml")
     assert errors == []
 
 
@@ -174,7 +174,7 @@ def test_extra_dependency_fields_are_ignored():
         python_version="3.12",
         non_existent_field="will be ignored",
     )
-    assert model.project_name == "extra-fields"
+    assert model.model_dump()["project_name"] == "extra-fields"
     # The extra field is not in model_fields
     assert "non_existent_field" not in cls.model_fields
 
@@ -194,5 +194,8 @@ def test_json_schema_generates():
     """The template's schema can produce a JSON schema."""
     t = Template(TEMPLATE_DIR)
     json_schema = t.get_schema_json()
-    assert "properties" in json_schema
-    assert json_schema.get("title") in ("PyprojectUvModel", None) or "title" in json_schema
+    assert json_schema["title"] == "PyprojectUvModel"
+    properties = json_schema["properties"]
+    assert "project_name" in properties
+    assert properties["project_name"]["type"] == "string"
+    assert "python_version" in properties

@@ -1,189 +1,108 @@
-"""The complete Templateer generation pipeline.
+"""The Templateer generation pipeline.
 
-Wires together template resolution, LLM model generation,
-deterministic rendering, and output validation into a single
-end-to-end flow that mirrors the Gen entity lifecycle from the
-generation.allium spec.
+  1. Resolve the template.
+  2. Ask the LLM to fill its schema.
+  3. Render deterministically from the validated model.
+  4. Validate the rendered artifact.
 
-Pipeline flow:
-  1. Resolve the named template from the catalog.
-  2. Ask the LLM to fill the template's Pydantic schema.
-  3. Render the template with the validated model.
-  4. Validate the rendered output (syntax check).
-  5. Return the Generation with status READY and the artifact.
-
-On any failure the Generation is returned with status FAILED
-and an appropriate FailureReason.
+Every failure returns a GenerationResult.  Nothing escapes as an exception —
+that promise is either total or worthless.
 """
 
+import logging
 from typing import Any
 
+from pydantic_ai.exceptions import UnexpectedModelBehavior, UserError
+
 from templateer.catalog import TemplateCatalog
-from templateer.generation import (
-    FailureReason,
-    Generation,
-    GenerationStatus,
-)
-from templateer.generator import ModelGenerationError, generate_model
+from templateer.generator import generate_model
 from templateer.renderer import RenderError
-from templateer.template import TemplateNotFoundError
+from templateer.result import FailureReason, GenerationRequest, GenerationResult
+from templateer.template import Template, TemplateLoadError, TemplateNotFoundError
 from templateer.validators import validate_output
 
-
-class PipelineError(Exception):
-    """Raised when the generation pipeline encounters an unrecoverable error."""
-
-    def __init__(self, message: str, reason: FailureReason) -> None:
-        self.reason = reason
-        super().__init__(message)
+logger = logging.getLogger(__name__)
 
 
-# ---------------------------------------------------------------------------
-# Core pipeline
-# ---------------------------------------------------------------------------
+def generate(catalog: TemplateCatalog, request: GenerationRequest) -> GenerationResult:
+    """Run the pipeline, retrying while the failure is worth retrying.
 
-
-def run_pipeline(
-    catalog: TemplateCatalog,
-    template_name: str,
-    user_request: str,
-    context: dict[str, Any] | None = None,
-    model_name: str = "openai:gpt-4.1-mini",
-    max_retries: int = 3,
-) -> Generation:
-    """Execute the full generation pipeline.
-
-    Implements the Generation lifecycle from the Allium spec:
-    submitted → generating → ready (success) or failed (error).
-
-    On failure, the caller can inspect ``gen.can_retry`` and call
-    :func:`retry_generation` to re-attempt.
-
-    Args:
-        catalog: The template catalog to search.
-        template_name: Exact template directory name.
-        user_request: What the user/agent wants to generate.
-        context: Optional project facts to help the LLM.
-        model_name: The LLM model identifier.
-        max_retries: Maximum LLM retry attempts (default 3).
-
-    Returns:
-        A :class:`Generation` entity with the final status and
-        artifact text (if successful) or failure details.
+    This is the single entry point.  Set ``request.max_attempts = 1`` to
+    disable retries; there is no separate retry function to keep in sync.
     """
-    gen = Generation(
-        requested_path="",
-        template_name=template_name,
-    )
-
-    # ----------------------------------------------------------------
-    # Step 1 — Resolve template
-    # ----------------------------------------------------------------
-    try:
-        template = catalog.get(template_name)
-        gen.matched_template = template.name
-    except TemplateNotFoundError:
-        gen.status = GenerationStatus.FAILED
-        gen.failure_reason = FailureReason.NO_TEMPLATE
-        return gen
-
-    gen.requested_path = template.metadata.outputs[0].path
-
-    # ----------------------------------------------------------------
-    # Step 2 — Generate the Pydantic model via LLM
-    # ----------------------------------------------------------------
-    gen.status = GenerationStatus.GENERATING
-
-    try:
-        model, _messages = generate_model(
-            template,
-            user_request=user_request,
-            context=context,
-            model_name=model_name,
-            max_retries=max_retries,
+    result = _attempt(catalog, request, attempt=1)
+    while result.can_retry:
+        reason = result.failure_reason
+        assert reason is not None  # can_retry implies a retryable reason
+        logger.info(
+            "retrying %s after %s (attempt %d/%d)",
+            request.template_name, reason.value,
+            result.attempt + 1, request.max_attempts,
         )
-    except ModelGenerationError as e:
-        gen.status = GenerationStatus.FAILED
-        gen.failure_reason = FailureReason.LLM_FAILED
-        gen.artifact = str(e)
-        return gen
-
-    # ----------------------------------------------------------------
-    # Step 3 — Render the artifact deterministically
-    # ----------------------------------------------------------------
-    try:
-        rendered = template.render(model)
-    except RenderError as e:
-        gen.status = GenerationStatus.FAILED
-        gen.failure_reason = FailureReason.RENDER_FAILED
-        gen.artifact = str(e)
-        return gen
-
-    # ----------------------------------------------------------------
-    # Step 4 — Validate the rendered output
-    # ----------------------------------------------------------------
-    output_language = template.metadata.outputs[0].language
-    output_validators = [v.model_dump() for v in template.metadata.validators]
-
-    errors = validate_output(rendered, output_language, output_validators)
-
-    if errors:
-        gen.status = GenerationStatus.FAILED
-        gen.failure_reason = FailureReason.OUTPUT_VALIDATION_FAILED
-        gen.artifact = "\n".join(errors)
-        return gen
-
-    # ----------------------------------------------------------------
-    # Success
-    # ----------------------------------------------------------------
-    gen.status = GenerationStatus.READY
-    gen.artifact = rendered
-    return gen
-
-
-# ---------------------------------------------------------------------------
-# Retry support
-# ---------------------------------------------------------------------------
-
-
-def retry_generation(
-    catalog: TemplateCatalog,
-    gen: Generation,
-    user_request: str,
-    context: dict[str, Any] | None = None,
-) -> Generation:
-    """Retry a previously failed generation.
-
-    Only generations with ``can_retry == True`` may be retried.
-    The retry count is carried forward and incremented.
-
-    Args:
-        catalog: The template catalog.
-        gen: The failed generation to retry.
-        user_request: Original user request.
-        context: Original context.
-
-    Returns:
-        A new :class:`Generation` entity with the retry result.
-
-    Raises:
-        ValueError: If the generation cannot be retried (not FAILED
-            or retry count exhausted).
-    """
-    if not gen.can_retry:
-        raise ValueError(
-            f"Generation cannot be retried: status={gen.status.value}, retries={gen.retry_count}"
-        )
-
-    next_attempt = gen.retry_count + 1
-
-    result = run_pipeline(
-        catalog=catalog,
-        template_name=gen.template_name,
-        user_request=user_request,
-        context=context,
-        max_retries=next_attempt,  # ← carry forward the retry budget
-    )
-
-    result.retry_count = next_attempt
+        result = _attempt(catalog, request, attempt=result.attempt + 1)
     return result
+
+
+def _attempt(
+    catalog: TemplateCatalog, request: GenerationRequest, attempt: int
+) -> GenerationResult:
+    def fail(reason: FailureReason, detail: str, **extra: Any) -> GenerationResult:
+        return GenerationResult(
+            request=request, attempt=attempt,
+            failure_reason=reason, error_detail=detail, **extra,
+        )
+
+    # 1 — Resolve ---------------------------------------------------------
+    try:
+        template: Template = catalog.get(request.template_name)
+    except (TemplateNotFoundError, TemplateLoadError) as e:
+        return fail(FailureReason.NO_TEMPLATE, str(e))
+
+    output_path = template.metadata.output.path
+
+    # 2 — Generate the model ----------------------------------------------
+    #
+    # The boundary is deliberately broad.  Schema loading, prompt loading,
+    # context serialization, Agent construction and the network call all live
+    # in here, and every one of them has been observed to raise.
+    try:
+        model = generate_model(
+            template,
+            user_request=request.user_request,
+            context=request.context,
+            model_name=request.model_name,
+        )
+    except UserError as e:
+        # Missing API key, unknown model id — caller misconfiguration.
+        return fail(FailureReason.CONFIG_ERROR, str(e), output_path=output_path)
+    except UnexpectedModelBehavior as e:
+        # Output-validation retries exhausted inside pydantic-ai.
+        return fail(FailureReason.MODEL_VALIDATION_FAILED, str(e), output_path=output_path)
+    except TemplateLoadError as e:
+        return fail(FailureReason.NO_TEMPLATE, str(e), output_path=output_path)
+    except Exception as e:
+        logger.debug("model generation failed", exc_info=True)
+        return fail(FailureReason.LLM_FAILED, f"{type(e).__name__}: {e}",
+                    output_path=output_path)
+
+    model_dump = model.model_dump(mode="json")
+
+    # 3 — Render ----------------------------------------------------------
+    try:
+        artifact = template.render(model)
+    except RenderError as e:
+        return fail(FailureReason.RENDER_FAILED, str(e),
+                    output_path=output_path, model=model_dump)
+
+    # 4 — Validate the artifact -------------------------------------------
+    errors, warnings = validate_output(
+        artifact, template.metadata.output.language, template.metadata.validators
+    )
+    if errors:
+        return fail(FailureReason.OUTPUT_VALIDATION_FAILED, "; ".join(errors),
+                    output_path=output_path, model=model_dump)
+
+    return GenerationResult(
+        request=request, attempt=attempt, output_path=output_path,
+        model=model_dump, artifact=artifact, warnings=warnings,
+    )

@@ -1,10 +1,9 @@
 name: pyproject-uv
 description: Generate a uv-style pyproject.toml for a Python project.
 
-outputs:
-  - path: pyproject.toml
-    kind: full_file
-    language: toml
+output:
+  path: pyproject.toml
+  language: toml
 
 schema:
   module: schema
@@ -17,8 +16,5 @@ renderer:
   engine: minijinja
   file: template.j2
 
-strict_context: true
-
-triggers:
-  filenames:
-    - pyproject.toml
+trigger_filenames:
+  - pyproject.toml

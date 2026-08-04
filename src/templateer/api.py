@@ -4,16 +4,6 @@ Provides a clean, typed Python interface for discovering and using
 Templateer templates, suitable for embedding in other Python programs,
 scripts, and agent frameworks.
 
-Allium spec alignment:
-  surface PythonAPI {
-      provides:
-          StartGeneration(...)
-          ListAllTemplates
-          GenerateFromTemplate(...)
-          RenderFromModel(...)
-          ValidateArtifact(...)
-  }
-
 Usage:
     registry = TemplateRegistry.from_paths(["./templates"])
 
@@ -27,7 +17,10 @@ Usage:
         user_request="Create a pyproject.toml for a FastAPI app using uv.",
         context={"uses_fastapi": True, "uses_pytest": True},
     )
-    print(result.rendered)
+    if not result.succeeded:
+        print(result.error_detail)
+    else:
+        print(result.artifact)
 
     # Render from an existing model dict (LLM-free)
     rendered = registry.render_from_model(
@@ -42,12 +35,10 @@ Usage:
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel
-
 from templateer.catalog import TemplateCatalog
-from templateer.generator import ModelGenerationError, generate_model
-from templateer.models import TemplateGenerationResult
-from templateer.renderer import RenderError
+from templateer.generator import DEFAULT_MODEL
+from templateer.pipeline import generate
+from templateer.result import GenerationRequest, GenerationResult
 from templateer.template import Template
 from templateer.validators import validate_output
 
@@ -153,76 +144,18 @@ class TemplateRegistry:
         template_name: str,
         user_request: str,
         context: dict[str, Any] | None = None,
-        model_name: str = "openai:gpt-4.1-mini",
-    ) -> TemplateGenerationResult:
-        """Generate an artifact using a template (full pipeline with LLM).
+        model_name: str = DEFAULT_MODEL,
+        max_attempts: int = 3,
+    ) -> GenerationResult:
+        """Generate an artifact (full pipeline with LLM).
 
-        This method:
-          1. Resolves the named template from the catalog.
-          2. Asks the LLM to fill the template's Pydantic schema.
-          3. Renders the template with the validated model.
-          4. Validates the rendered output.
-
-        Args:
-            template_name: Exact template directory name.
-            user_request: What the user/agent wants to generate.
-            context: Optional project facts (dict of key-value pairs)
-                     that help the LLM make better choices.
-            model_name: The LLM model identifier.
-
-        Returns:
-            A :class:`TemplateGenerationResult` containing the validated
-            model, the rendered artifact, and any validation messages.
-
-        Raises:
-            TemplateNotFoundError: If no template matches *template_name*.
-            ModelGenerationError: If the LLM fails to produce a valid model.
-            RenderError: If the template rendering step fails.
-            RuntimeError: If output validation fails.
+        Returns a GenerationResult rather than raising: LLM failure is an expected
+        outcome, not an exceptional one.  Check ``result.succeeded``.
         """
-        validation_messages: list[str] = []
-
-        # ── 1. Resolve template ──────────────────────────────────────
-        template = self._catalog.get(template_name)
-
-        # ── 2. Generate model via LLM ────────────────────────────────
-        try:
-            model, msgs = generate_model(
-                template=template,
-                user_request=user_request,
-                context=context,
-                model_name=model_name,
-            )
-            validation_messages.extend(msgs)
-        except ModelGenerationError:
-            raise
-        except Exception as e:
-            raise ModelGenerationError(f"Unexpected error during model generation: {e}") from e
-
-        # ── 3. Render artifact ───────────────────────────────────────
-        try:
-            rendered = template.render(model)
-        except RenderError:
-            raise
-        except Exception as e:
-            raise RenderError(f"Unexpected error during rendering: {e}") from e
-
-        # ── 4. Validate output ───────────────────────────────────────
-        output_language = template.metadata.outputs[0].language
-        output_validators = [v.model_dump() for v in template.metadata.validators]
-
-        errors = validate_output(rendered, output_language, output_validators)
-        if errors:
-            raise RuntimeError(
-                f"Output validation failed for '{template_name}': " + "; ".join(errors)
-            )
-
-        return TemplateGenerationResult(
-            template_name=template_name,
-            model=model.model_dump(mode="json"),
-            rendered=rendered,
-            validation_messages=validation_messages,
-        )
+        return generate(self._catalog, GenerationRequest(
+            template_name=template_name, user_request=user_request,
+            context=context or {}, model_name=model_name, max_attempts=max_attempts,
+        ))
 
     # ------------------------------------------------------------------
     # LLM-free rendering
@@ -285,44 +218,10 @@ class TemplateRegistry:
             TemplateNotFoundError: If the named template is not found.
         """
         template = self._catalog.get(template_name)
-        output_language = template.metadata.outputs[0].language
-        validators = [v.model_dump() for v in template.metadata.validators]
-        return validate_output(artifact, output_language, validators)
-
-    # ------------------------------------------------------------------
-    # Model-only generation
-    # ------------------------------------------------------------------
-
-    def generate_model(
-        self,
-        template_name: str,
-        user_request: str,
-        context: dict[str, Any] | None = None,
-    ) -> BaseModel:
-        """Generate just the Pydantic model (no rendering).
-
-        This is useful when the caller wants to inspect, modify, or
-        persist the model before rendering.
-
-        Args:
-            template_name: Exact template directory name.
-            user_request: What to generate.
-            context: Optional project facts.
-
-        Returns:
-            A validated Pydantic model instance.
-
-        Raises:
-            TemplateNotFoundError: If the named template is not found.
-            ModelGenerationError: If the LLM fails to produce a valid model.
-        """
-        template = self._catalog.get(template_name)
-        model, _ = generate_model(
-            template=template,
-            user_request=user_request,
-            context=context,
+        errors, _ = validate_output(
+            artifact, template.output_language, template.metadata.validators
         )
-        return model
+        return errors
 
     # ------------------------------------------------------------------
     # Introspection

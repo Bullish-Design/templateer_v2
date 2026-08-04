@@ -1,7 +1,6 @@
 """Templateer CLI — typed, constrained artifact generation for AI agents.
 
 Expose Templateer via a CLI suitable for both human and agent use.
-Allium spec alignment: CLI surface from generation.allium.
 
 Usage:
     templateer list
@@ -10,6 +9,7 @@ Usage:
     templateer render <name> --input model.json
     templateer generate <name> --request "..."
     templateer validate <name> --input model.json
+    templateer check <name>
 """
 
 from __future__ import annotations
@@ -17,40 +17,21 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
+from typing import Any
 
 import click
 
+from templateer.audit import audit_template
 from templateer.catalog import TemplateCatalog
-from templateer.generation import GenerationStatus
-from templateer.pipeline import run_pipeline
-from templateer.template import TemplateLoadError, TemplateNotFoundError
-from templateer.validators import validate_output as validate_artifact
+from templateer.generator import DEFAULT_MODEL
+from templateer.pipeline import generate
+from templateer.result import GenerationRequest
+from templateer.template import Template, TemplateLoadError, TemplateNotFoundError
+from templateer.validators import validate_output
 
 # ---------------------------------------------------------------------------
 # Path resolution helpers
 # ---------------------------------------------------------------------------
-
-
-def _get_default_paths() -> list[Path]:
-    """Get default template search paths.
-
-    Returns:
-        List of Paths: bundled templates (src/templateer/templates)
-        and project-local templates (cwd/templates) if they exist.
-    """
-    paths: list[Path] = []
-
-    # Bundled templates shipped with the package
-    bundled = Path(__file__).parent / "templates"
-    if bundled.exists() and bundled.is_dir():
-        paths.append(bundled)
-
-    # Project-local templates in the current working directory
-    cwd_templates = Path.cwd() / "templates"
-    if cwd_templates.exists() and cwd_templates.is_dir():
-        paths.append(cwd_templates)
-
-    return paths
 
 
 def _resolve_paths(
@@ -59,7 +40,7 @@ def _resolve_paths(
     """Resolve template search paths from CLI options and defaults.
 
     If explicit paths are given via ``--paths``, use only those.
-    Otherwise fall back to the default search paths.
+    Otherwise use ``./templates`` relative to the current directory.
 
     Args:
         extra_paths: Tuple of path strings from the ``--paths`` option.
@@ -69,7 +50,8 @@ def _resolve_paths(
     """
     if extra_paths:
         return [Path(p) for p in extra_paths]
-    return _get_default_paths()
+    cwd_templates = Path.cwd() / "templates"
+    return [cwd_templates] if cwd_templates.exists() and cwd_templates.is_dir() else []
 
 
 def _load_catalog(paths: tuple[str, ...] | None = None) -> TemplateCatalog:
@@ -86,6 +68,59 @@ def _load_catalog(paths: tuple[str, ...] | None = None) -> TemplateCatalog:
     if resolved:
         catalog.load_from_paths(resolved)
     return catalog
+
+
+def _get_template_or_exit(
+    template_name: str, paths: tuple[str, ...] | None = None
+) -> Template:
+    """Load a template from the catalog, exiting with an error if unknown."""
+    catalog = _load_catalog(paths)
+    try:
+        return catalog.get(template_name)
+    except (TemplateNotFoundError, TemplateLoadError) as e:
+        click.echo(f"Error: {e}", err=True)
+        sys.exit(1)
+
+
+def _load_input_json(input_file: str) -> Any:
+    """Load and parse a JSON input file, exiting with an error if unreadable."""
+    input_path = Path(input_file)
+    if not input_path.exists():
+        click.echo(f"Error: input file not found: {input_file}", err=True)
+        sys.exit(1)
+    try:
+        return json.loads(input_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as e:
+        click.echo(f"Error reading input file: {e}", err=True)
+        sys.exit(1)
+
+
+def _load_context_file(path: Path) -> tuple[str | None, dict[str, Any]]:
+    """Parse a context file into ``(user_request, facts)``.
+
+    Accepts either shape, and errors on anything else rather than
+    silently producing an empty context:
+        {"user_request": "...", "facts": {...}}
+        {"any": "flat", "project": "facts"}
+    """
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as e:
+        raise click.ClickException(f"Error reading context file {path}: {e}")
+
+    if not isinstance(data, dict):
+        raise click.ClickException(
+            f"{path}: expected a JSON object, got {type(data).__name__}"
+        )
+    if "facts" in data or "user_request" in data:
+        facts = data.get("facts", {})
+        if not isinstance(facts, dict):
+            raise click.ClickException(f"{path}: 'facts' must be an object")
+        request = data.get("user_request")
+        if request is not None and not isinstance(request, str):
+            raise click.ClickException(f"{path}: 'user_request' must be a string")
+        return request, facts
+    return None, data
 
 
 # ---------------------------------------------------------------------------
@@ -129,7 +164,7 @@ def list_templates(paths: tuple[str, ...]) -> None:
     for template in catalog.templates:
         click.echo(f"  {template.name}")
         click.echo(f"    {template.description}")
-        click.echo(f"    Output: {template.output_kind}")
+        click.echo(f"    Output: {template.output_language}")
         if template.trigger_paths:
             click.echo(f"    Generates: {', '.join(sorted(template.trigger_paths))}")
         click.echo()
@@ -145,22 +180,14 @@ def list_templates(paths: tuple[str, ...]) -> None:
 )
 def describe_template(template_name: str, paths: tuple[str, ...]) -> None:
     """Describe a template's metadata."""
-    catalog = _load_catalog(paths)
-
-    try:
-        template = catalog.get(template_name)
-    except (TemplateNotFoundError, TemplateLoadError) as e:
-        click.echo(f"Error: {e}", err=True)
-        sys.exit(1)
+    template = _get_template_or_exit(template_name, paths)
 
     click.echo(f"Name: {template.name}")
     click.echo(f"Description: {template.description}")
-    click.echo(f"Output kind: {template.output_kind}")
-    click.echo(f"Strict context: {template.metadata.strict_context}")
+    click.echo(f"Output language: {template.output_language}")
     click.echo(f"Trigger paths: {template.trigger_paths}")
-
-    for output in template.metadata.outputs:
-        click.echo(f"  Generates: {output.path} ({output.kind}, {output.language})")
+    output = template.metadata.output
+    click.echo(f"  Generates: {output.path} ({output.language})")
 
 
 @main.command("schema")
@@ -173,14 +200,7 @@ def describe_template(template_name: str, paths: tuple[str, ...]) -> None:
 )
 def show_schema(template_name: str, paths: tuple[str, ...]) -> None:
     """Show the JSON schema for a template."""
-    catalog = _load_catalog(paths)
-
-    try:
-        template = catalog.get(template_name)
-    except (TemplateNotFoundError, TemplateLoadError) as e:
-        click.echo(f"Error: {e}", err=True)
-        sys.exit(1)
-
+    template = _get_template_or_exit(template_name, paths)
     schema = template.get_schema_json()
     click.echo(json.dumps(schema, indent=2))
 
@@ -215,28 +235,12 @@ def render_from_model(
 ) -> None:
     """Render a template from a model JSON file (no LLM).
 
-    This is the fast, deterministic path: load pre-built model data
-    and render it through the Jinja template.
+    This is the fast, deterministic path: load pre-built model data,
+    render it through the Jinja template, and validate the artifact
+    before anything is written to disk.
     """
-    catalog = _load_catalog(paths)
-
-    try:
-        template = catalog.get(template_name)
-    except (TemplateNotFoundError, TemplateLoadError) as e:
-        click.echo(f"Error: {e}", err=True)
-        sys.exit(1)
-
-    # Load model data from the JSON input file
-    input_path = Path(input_file)
-    if not input_path.exists():
-        click.echo(f"Error: input file not found: {input_file}", err=True)
-        sys.exit(1)
-
-    try:
-        input_data = json.loads(input_path.read_text())
-    except (json.JSONDecodeError, OSError) as e:
-        click.echo(f"Error reading input file: {e}", err=True)
-        sys.exit(1)
+    template = _get_template_or_exit(template_name, paths)
+    input_data = _load_input_json(input_file)
 
     # Validate against the template's Pydantic schema
     schema_class = template.get_schema_class()
@@ -253,9 +257,21 @@ def render_from_model(
         click.echo(f"Render error: {e}", err=True)
         sys.exit(1)
 
+    # Validate the rendered artifact before it can reach disk
+    errors, warnings = validate_output(
+        rendered, template.output_language, template.metadata.validators
+    )
+    for warning in warnings:
+        click.echo(f"Warning: {warning}", err=True)
+    if errors:
+        click.echo("✗ Output validation failed:", err=True)
+        for err in errors:
+            click.echo(f"  - {err}", err=True)
+        sys.exit(1)
+
     if output_file:
         try:
-            Path(output_file).write_text(rendered)
+            Path(output_file).write_text(rendered, encoding="utf-8")
         except OSError as e:
             click.echo(f"Error writing output: {e}", err=True)
             sys.exit(1)
@@ -291,8 +307,14 @@ def render_from_model(
     "--model",
     "-m",
     "model_name",
-    default="openai:gpt-4.1-mini",
+    default=DEFAULT_MODEL,
     help="LLM model to use.",
+)
+@click.option(
+    "--max-attempts",
+    "max_attempts",
+    default=3,
+    help="Whole-pipeline attempts.",
 )
 @click.option(
     "--paths",
@@ -306,6 +328,7 @@ def generate_artifact(
     user_request: str | None,
     output_file: str | None,
     model_name: str,
+    max_attempts: int,
     paths: tuple[str, ...],
 ) -> None:
     """Generate an artifact using a template (full pipeline with LLM).
@@ -317,62 +340,49 @@ def generate_artifact(
     catalog = _load_catalog(paths)
 
     # Build context from file and/or explicit request
-    context: dict[str, object] = {}
+    context: dict[str, Any] = {}
     if context_file:
         ctx_path = Path(context_file)
         if not ctx_path.exists():
             click.echo(f"Error: context file not found: {context_file}", err=True)
             sys.exit(1)
-        try:
-            context_data = json.loads(ctx_path.read_text())
-        except (json.JSONDecodeError, OSError) as e:
-            click.echo(f"Error reading context file: {e}", err=True)
-            sys.exit(1)
-        # Support both flat dict and nested {"user_request": ..., "facts": ...}
-        if isinstance(context_data, dict):
-            if "facts" in context_data:
-                facts = context_data["facts"]
-                if isinstance(facts, dict):
-                    context = dict(facts)  # type: ignore[arg-type]
-                if "user_request" in context_data and not user_request:
-                    raw = context_data["user_request"]
-                    if isinstance(raw, str):
-                        user_request = raw
-            else:
-                context = dict(context_data)  # type: ignore[arg-type]
+        request_from_file, facts = _load_context_file(ctx_path)
+        context = facts
+        if request_from_file and not user_request:
+            user_request = request_from_file
 
     if not user_request:
         user_request = f"Generate {template_name} artifact"
 
-    # Run the full generation pipeline
-    gen = run_pipeline(
-        catalog=catalog,
+    result = generate(catalog, GenerationRequest(
         template_name=template_name,
         user_request=user_request,
-        context=context,  # type: ignore[arg-type]
+        context=context,
         model_name=model_name,
-    )
+        max_attempts=max_attempts,
+    ))
 
-    if gen.status == GenerationStatus.FAILED:
-        click.echo(f"Generation failed: {gen.failure_reason}", err=True)
-        if gen.artifact:
-            click.echo(gen.artifact, err=True)
+    if not result.succeeded:
+        reason = result.failure_reason
+        assert reason is not None  # a failed result always carries a reason
+        click.echo(f"Generation failed: {reason.value}", err=True)
+        if result.error_detail:
+            click.echo(result.error_detail, err=True)
         sys.exit(1)
 
-    if gen.status == GenerationStatus.READY:
-        artifact = gen.artifact
-        if output_file and artifact:
-            try:
-                Path(output_file).write_text(artifact)
-            except OSError as e:
-                click.echo(f"Error writing output: {e}", err=True)
-                sys.exit(1)
-            click.echo(f"Generated {output_file}")
-        elif artifact:
-            click.echo(artifact)
+    for warning in result.warnings:
+        click.echo(f"Warning: {warning}", err=True)
+
+    artifact = result.artifact or ""
+    if output_file:
+        try:
+            Path(output_file).write_text(artifact, encoding="utf-8")
+        except OSError as e:
+            click.echo(f"Error writing output: {e}", err=True)
+            sys.exit(1)
+        click.echo(f"Generated {output_file}")
     else:
-        click.echo(f"Unexpected status: {gen.status}", err=True)
-        sys.exit(1)
+        click.echo(artifact)
 
 
 @main.command("validate")
@@ -390,7 +400,7 @@ def generate_artifact(
     multiple=True,
     help="Additional template search paths (replaces defaults).",
 )
-def validate_output(
+def validate_output_command(
     template_name: str,
     input_file: str,
     paths: tuple[str, ...],
@@ -400,27 +410,11 @@ def validate_output(
     Performs three checks:
       1. Model validation against the template's Pydantic schema
       2. Template rendering from the validated model
-      3. Output validation (parse check of the rendered artifact)
+      3. Output validation (parse check of the rendered artifact,
+         including the template author's declared validators)
     """
-    catalog = _load_catalog(paths)
-
-    try:
-        template = catalog.get(template_name)
-    except (TemplateNotFoundError, TemplateLoadError) as e:
-        click.echo(f"Error: {e}", err=True)
-        sys.exit(1)
-
-    # Load and validate the model
-    input_path = Path(input_file)
-    if not input_path.exists():
-        click.echo(f"Error: input file not found: {input_file}", err=True)
-        sys.exit(1)
-
-    try:
-        input_data = json.loads(input_path.read_text())
-    except (json.JSONDecodeError, OSError) as e:
-        click.echo(f"Error reading input: {e}", err=True)
-        sys.exit(1)
+    template = _get_template_or_exit(template_name, paths)
+    input_data = _load_input_json(input_file)
 
     schema_class = template.get_schema_class()
     try:
@@ -440,10 +434,12 @@ def validate_output(
 
     click.echo("✓ Template rendered successfully")
 
-    # Run output validators
-    output_language = template.metadata.outputs[0].language
-    errors = validate_artifact(rendered, output_language)
-
+    # Run output validators, including custom ones from metadata
+    errors, warnings = validate_output(
+        rendered, template.output_language, template.metadata.validators
+    )
+    for warning in warnings:
+        click.echo(f"Warning: {warning}", err=True)
     if errors:
         click.echo("✗ Output validation failed:")
         for err in errors:
@@ -451,6 +447,26 @@ def validate_output(
         sys.exit(1)
 
     click.echo("✓ Output validation passed")
+
+
+@main.command("check")
+@click.argument("template_name")
+@click.option(
+    "--paths",
+    "-p",
+    multiple=True,
+    help="Template search paths.",
+)
+def check_template(template_name: str, paths: tuple[str, ...]) -> None:
+    """Audit a template: fixtures render, parse, and resist injection."""
+    template = _get_template_or_exit(template_name, paths)
+    findings = audit_template(template)
+    if findings:
+        click.echo(f"✗ {len(findings)} finding(s):", err=True)
+        for finding in findings:
+            click.echo(f"  - {finding}", err=True)
+        sys.exit(1)
+    click.echo("✓ escaping audit passed")
 
 
 # ---------------------------------------------------------------------------

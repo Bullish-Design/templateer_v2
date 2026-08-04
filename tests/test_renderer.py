@@ -4,12 +4,14 @@ import json
 from pathlib import Path
 
 import pytest
+from pydantic import BaseModel
 
 from templateer.renderer import RenderError, render_template
 from templateer.template import Template
 
 
 @pytest.fixture
+
 def pyproject_template():
     """Load the pyproject-uv test template."""
     return Template(Path("templates/pyproject-uv"))
@@ -96,31 +98,21 @@ def test_render_with_all_fields(pyproject_template):
 
 
 def test_strict_mode_raises_on_undefined_variable(tmp_path):
-    """In strict mode, referencing undefined variables raises RenderError."""
+    """Undefined variables raise RenderError — strictness is the contract."""
     template_file = tmp_path / "template.j2"
     template_file.write_text("Hello {{ undefined_var }}!")
     with pytest.raises(RenderError, match="undefined value"):
-        render_template(template_file, {"name": "World"}, strict=True)
+        render_template(template_file, _Model(name="World"), "toml")
 
 
-def test_lenient_mode_does_not_raise_on_undefined(tmp_path):
-    """In lenient mode, undefined variables render as empty strings."""
+def test_render_with_model_object(tmp_path):
+    """Rendering works with a Pydantic model as the render input."""
+    class M(BaseModel):
+        project_name: str
+
     template_file = tmp_path / "template.j2"
-    template_file.write_text("Hello {{ undefined_var }}!")
-    result = render_template(template_file, {"name": "World"}, strict=False)
-    # lenient mode should produce empty string for undefined
-    assert "Hello " in result
-
-
-def test_render_with_dict_model(tmp_path):
-    """Rendering works with a plain dict as model."""
-    template_file = tmp_path / "template.j2"
-    template_file.write_text("name = {{ project_name }}")
-    result = render_template(
-        template_file,
-        {"project_name": '"test-project"'},
-        strict=True,
-    )
+    template_file.write_text('name = "{{ project_name }}"')
+    result = render_template(template_file, M(project_name="test-project"), "toml")
     assert 'name = "test-project"' in result
 
 
@@ -128,7 +120,7 @@ def test_missing_template_file_raises(tmp_path):
     """Raising from a non-existent template file raises RenderError."""
     missing = tmp_path / "does-not-exist.j2"
     with pytest.raises(RenderError, match="Template file not found"):
-        render_template(missing, {"key": "value"})
+        render_template(missing, _Model(name="World"), "toml")
 
 
 def test_render_respects_model_dump_json_mode(pyproject_template):
@@ -151,11 +143,7 @@ def test_render_respects_model_dump_json_mode(pyproject_template):
 def test_render_template_directly(pyproject_template, fastapi_model):
     """render_template function works directly with a Template instance."""
     template_path = pyproject_template.resolve_path(pyproject_template.metadata.renderer.file)
-    rendered = render_template(
-        template_path,
-        fastapi_model,
-        strict=pyproject_template.metadata.strict_context,
-    )
+    rendered = render_template(template_path, fastapi_model, "toml")
     assert "fastapi-app" in rendered
     assert "fastapi>=0.115.0" in rendered
 
@@ -181,12 +169,20 @@ def test_render_jinja_syntax_errors_raise(tmp_path):
     template_file = tmp_path / "template.j2"
     template_file.write_text("[project]\n{% if invalid... %}x")
     with pytest.raises(RenderError):
-        render_template(template_file, {"name": "test"}, strict=True)
+        render_template(template_file, _Model(name="test"), "toml")
 
 
 def test_render_edge_case_empty_strings(tmp_path):
     """Render handles empty string field values correctly."""
+    class M(BaseModel):
+        val: str
+
     template_file = tmp_path / "template.j2"
-    template_file.write_text("value={{ val }}")
-    result = render_template(template_file, {"val": ""}, strict=True)
-    assert "value=" in result
+    template_file.write_text('value="{{ val }}"')
+    result = render_template(template_file, M(val=""), "toml")
+    assert 'value=""' in result
+
+
+class _Model(BaseModel):
+    """Minimal model used by tests that exercise render_template directly."""
+    name: str

@@ -70,9 +70,9 @@ class TemplateCatalog:
             raise TemplateNotFoundError(f"No template found with name: {name}")
         return self._templates[name]
 
-    def templates_by_output_kind(self, kind: str) -> list[Template]:
-        """Find templates that produce a given output kind."""
-        return [t for t in self._templates.values() if t.output_kind == kind]
+    def templates_by_language(self, language: str) -> list[Template]:
+        """Find templates that produce a given output language."""
+        return [t for t in self._templates.values() if t.output_language == language]
 
     def __len__(self) -> int:
         return len(self._templates)

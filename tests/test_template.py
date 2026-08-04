@@ -63,10 +63,9 @@ def test_name_must_match_directory(tmp_path):
     metadata.write_text("""\
 name: different-name
 description: A test template
-outputs:
-  - path: out.txt
-    kind: full_file
-    language: toml
+output:
+  path: out.txt
+  language: toml
 schema:
   module: schema
   class: TestModel
@@ -98,9 +97,87 @@ def test_resolve_path():
     assert str(resolved).endswith("schema.py")
 
 
+def test_resolve_path_escapes_root_raises(tmp_path):
+    """A path escaping the template root is a template bug, not a feature."""
+    template_dir = tmp_path / "contained"
+    template_dir.mkdir()
+    metadata = template_dir / "metadata.yml"
+    metadata.write_text("""\
+name: contained
+description: A test template
+output:
+  path: out.txt
+  language: toml
+schema:
+  module: schema
+  class: TestModel
+prompt:
+  file: prompt.md
+renderer:
+  engine: minijinja
+  file: template.j2
+""")
+    t = Template(template_dir)
+    with pytest.raises(TemplateLoadError, match="escapes the template root"):
+        t.resolve_path("../../secret.txt")
+
+
+def test_resolve_path_inside_root_ok(tmp_path):
+    """Paths inside the template root resolve normally."""
+    template_dir = tmp_path / "contained"
+    template_dir.mkdir()
+    metadata = template_dir / "metadata.yml"
+    metadata.write_text("""\
+name: contained
+description: A test template
+output:
+  path: out.txt
+  language: toml
+schema:
+  module: schema
+  class: TestModel
+prompt:
+  file: prompt.md
+renderer:
+  engine: minijinja
+  file: template.j2
+""")
+    t = Template(template_dir)
+    resolved = t.resolve_path("metadata.yml")
+    assert resolved == metadata.resolve()
+
+
 def test_properties():
     """Template properties return expected values."""
     t = Template(Path("templates/pyproject-uv"))
     assert t.name == "pyproject-uv"
-    assert t.output_kind == "toml"
+    assert t.output_language == "toml"
     assert "pyproject.toml" in t.trigger_paths
+
+
+def test_load_example(tmp_path):
+    """load_example returns the first input fixture as JSON, or None."""
+    t = Template(Path("templates/pyproject-uv"))
+    example = t.load_example()
+    assert example is not None
+    assert '"project_name"' in example
+
+    # A template with no examples returns None
+    bare = tmp_path / "bare"
+    bare.mkdir()
+    (bare / "metadata.yml").write_text("""\
+name: bare
+description: no examples
+output:
+  path: out.txt
+  language: toml
+schema:
+  module: schema
+  class: TestModel
+prompt:
+  file: prompt.md
+renderer:
+  engine: minijinja
+  file: template.j2
+""")
+    assert Template(bare).load_example() is None

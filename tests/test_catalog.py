@@ -35,9 +35,9 @@ def test_catalog_raises_on_unknown_name(catalog_with_pyproject_uv):
         catalog_with_pyproject_uv.get("nonexistent-template")
 
 
-def test_catalog_templates_by_output_kind(catalog_with_pyproject_uv):
-    """Filtering by output kind works."""
-    toml_templates = catalog_with_pyproject_uv.templates_by_output_kind("toml")
+def test_catalog_templates_by_language(catalog_with_pyproject_uv):
+    """Filtering by output language works."""
+    toml_templates = catalog_with_pyproject_uv.templates_by_language("toml")
     assert any(t.name == "pyproject-uv" for t in toml_templates)
 
 
@@ -83,10 +83,9 @@ def test_catalog_load_from_paths_duplicate_first_wins(tmp_path):
     (tmpl1 / "metadata.yml").write_text("""\
 name: same-name
 description: First version
-outputs:
-  - path: out.txt
-    kind: full_file
-    language: toml
+output:
+  path: out.txt
+  language: toml
 schema:
   module: schema
   class: TestModel
@@ -102,10 +101,9 @@ renderer:
     (tmpl2 / "metadata.yml").write_text("""\
 name: same-name
 description: Second version (should be ignored)
-outputs:
-  - path: out.txt
-    kind: full_file
-    language: toml
+output:
+  path: out.txt
+  language: toml
 schema:
   module: schema
   class: TestModel
@@ -130,10 +128,9 @@ def test_catalog_load_skips_broken_templates(tmp_path):
     metadata = template_dir / "metadata.yml"
     metadata.write_text("""\
 name: broken
-outputs:
-  - path: out.txt
-    kind: full_file
-    language: toml
+output:
+  path: out.txt
+  language: toml
 schema:
   module: schema
   class: TestModel
@@ -151,10 +148,9 @@ renderer:
     good_metadata.write_text("""\
 name: good-template
 description: A valid template
-outputs:
-  - path: out.txt
-    kind: full_file
-    language: toml
+output:
+  path: out.txt
+  language: toml
 schema:
   module: schema
   class: TestModel

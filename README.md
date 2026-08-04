@@ -21,7 +21,7 @@ Generated file or artifact
 - **Deterministic output**: Same validated model → same rendered artifact. Always.
 - **Typed constraints**: Pydantic schemas define exactly what data the LLM must produce. No raw string generation.
 - **Strict rendering**: undefined variables in templates are errors, not silent empty strings.
-- **Output validation**: rendered artifacts are parsed/validated (TOML, JSON, YAML, Python) to catch rendering bugs.
+- **Escaping at the render boundary**: every value interpolated into a structured artifact is escaped for the target language, so a validated model cannot alter the artifact's structure (see Security Considerations).
 - **Agent-friendly**: CLI and Python API designed for use by both humans and AI agents.
 
 ## Installation
@@ -71,7 +71,7 @@ templateer list [-p PATH ...]
 
 ### `templateer describe <name>`
 
-Show a template's metadata: description, output kind, trigger paths, and output specs.
+Show a template's metadata: description, output language, trigger paths, and output path.
 
 ```
 templateer describe pyproject-uv
@@ -110,7 +110,16 @@ templateer generate pyproject-uv --request "..." --model openai:gpt-4o
 | `-c`, `--context` | JSON file with project facts context |
 | `-o`, `--output` | Output file for generated artifact |
 | `-m`, `--model` | LLM model to use (default: `openai:gpt-4.1-mini`) |
+| `--max-attempts` | Whole-pipeline attempts (default 3) |
 | `-p`, `--paths` | Additional template search paths |
+
+The context file accepts either shape, and errors on anything else rather
+than silently producing an empty context:
+
+```json
+{"user_request": "Build a CLI tool", "facts": {"uses_click": true}}
+{"any": "flat", "project": "facts"}
+```
 
 ### `templateer validate <name> --input <file>`
 
@@ -118,6 +127,17 @@ Validate that a model JSON file produces valid output. Runs three checks: model 
 
 ```
 templateer validate pyproject-uv --input model.json
+```
+
+### `templateer check <name>`
+
+Audit a template for template authors: every example fixture must render,
+parse, and resist injection. The audit pokes a hostile payload into each
+string field of each fixture, re-renders, and compares the artifact's key
+set against the benign render — an injected payload changes the key set.
+
+```
+templateer check pyproject-uv
 ```
 
 ## Python API
@@ -147,11 +167,24 @@ result = registry.generate(
     user_request="Create a pyproject.toml for a FastAPI app using uv.",
     context={"uses_fastapi": True, "uses_pytest": True},
 )
-print(result.rendered)
+if not result.succeeded:
+    print(result.error_detail)
+else:
+    print(result.artifact)   # the rendered artifact
+    print(result.model)      # the validated model dump
 
 # Validate an artifact
 errors = registry.validate_artifact("pyproject-uv", rendered)
 ```
+
+`generate` returns a [`GenerationResult`](src/templateer/result.py): on failure it
+carries `failure_reason` and `error_detail` instead of raising — an LLM failure
+is an expected outcome, not an exceptional one. The validated model is available
+on `result.model`; there is no separate model-only entry point.
+
+`render_from_model` and `validate_artifact` are deterministic operations whose
+failures are programmer errors, so they raise (or return error lists) rather
+than returning a result object.
 
 ## Template Authoring Guide
 
@@ -178,10 +211,9 @@ templates/pyproject-uv/
 name: my-template
 description: What this template generates and when to use it.
 
-outputs:
-  - path: output.txt
-    kind: full_file
-    language: toml       # toml, json, yaml, python, ...
+output:
+  path: output.txt
+  language: toml       # toml, json, yaml, python, ...
 
 schema:
   module: schema         # Python module name (without .py)
@@ -194,12 +226,20 @@ renderer:
   engine: minijinja
   file: template.j2
 
-strict_context: true     # Undefined variables in template = error
+trigger_filenames:
+  - output.txt
 
-triggers:
-  filenames:
-    - output.txt
+# Optional output validators:
+# validators:
+#   - kind: parse
+#     language: toml
+#   - kind: command
+#     command: ["python", "-m", "ruff", "check", "-"]
+#     optional: true
 ```
+
+`extra="forbid"` is enforced on metadata: malformed validator metadata, the
+old `outputs:` list shape, or unknown keys fail loudly at template load.
 
 ### 2. Create `schema.py` (Pydantic model)
 
@@ -221,17 +261,37 @@ Instructions that help the LLM fill the schema correctly. Write in plain English
 
 ### 4. Create `template.j2` (Jinja template)
 
-The template receives ONLY the validated model dump. In strict mode, references to undefined variables are errors.
+The template receives ONLY the validated model dump. Undefined variables
+are always errors — strictness is the contract, not a per-template knob.
+
+**The one authoring rule:** in a structured-language template, every string
+interpolation sits inside double quotes.
 
 ```jinja
 [project]
-name = "{{ name }}"
-language = "{{ language }}"
+name = "{{ name }}"      # ✅ correct
+language = "{{ language }}"  # ✅ correct
 features = [
 {% for f in features %}
   "{{ f }}",
 {% endfor %}
 ]
+```
+
+```jinja
+name = {{ name }}        # ❌ wrong: a raw interpolation can break out of
+                         #    the string literal and alter the structure
+```
+
+Values are escaped for the target language at the render boundary
+(`escaping.py`), producing content that is safe inside a double-quoted string
+literal of that language. Guard nullable fields with `{% if %}` — interpolating
+`None` is a template authoring error, caught by `templateer check`:
+
+```jinja
+{% if project_description %}
+description = "{{ project_description }}"
+{% endif %}
 ```
 
 ### 5. Add examples and tests
@@ -254,10 +314,12 @@ uv run templateer validate my-template --input examples/scenario.input.json
 
 ### Rendering Rules
 
-1. Undefined variables are errors (strict mode).
+1. Undefined variables are errors — always. There is no lenient mode.
 2. The template receives only the validated model dump — no raw LLM output, no filesystem access.
 3. Complex decisions live in the schema, not in Jinja logic.
 4. The template must not call external tools or read files.
+5. In structured languages, every string interpolation sits inside double quotes; nullable fields are guarded with `{% if %}`.
+6. The template is self-contained: paths are resolved relative to the template root, and a path escaping the root is a load error.
 
 ## Architecture
 
@@ -274,10 +336,26 @@ uv run templateer validate my-template --input examples/scenario.input.json
 
 ## Security Considerations
 
-- **Template sandboxing**: MiniJinja templates have no filesystem access and no shell execution. They can only access the validated model data they receive.
-- **Strict mode**: undefined variable references are errors, preventing accidental data leaks.
-- **Output validation**: rendered artifacts are parsed to catch injection or corruption before they hit disk.
-- **No raw LLM output in templates**: the LLM never writes a file directly. Templates are static, reviewed files.
+- **Escaping at the render boundary**: every value interpolated into an
+  artifact is escaped for the target language (`escaping.py`), so a validated
+  model cannot alter the artifact's structure — a string that looks like
+  `\"\nlicense = \"PROPRIETARY` stays a string. This is enforced by the
+  MiniJinja finalizer at every `{{ }}` output site, and cannot be bypassed by
+  a template author.
+- **`templateer check`**: each bundled template is audited against injection
+  payloads — the audit probes every string field of every example fixture,
+  re-renders, and verifies the artifact's structure is unchanged (0 findings
+  is wired into the test suite).
+- **Strict mode**: undefined variable references are errors, preventing
+  accidental data leaks.
+- **No raw LLM output in templates**: the LLM never writes a file directly.
+  Templates are static, reviewed files.
+
+**Trusted templates.** Loading a template executes its `schema.py` (it is
+imported as Python) and runs any `command` validators declared in its metadata.
+Templates are trusted code — the sandbox only covers the render step, not
+template loading. For a personal library this is the right trade; do not load
+templates from untrusted sources.
 
 ## Development
 

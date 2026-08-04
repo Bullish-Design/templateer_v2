@@ -82,7 +82,7 @@ class TestDescribeTemplate:
         assert result.exit_code == 0
         assert "pyproject-uv" in result.output
         assert "Description:" in result.output
-        assert "Output kind:" in result.output
+        assert "Output language:" in result.output
 
     def test_describe_unknown_template(self, runner: CliRunner, templates_arg: list[str]) -> None:
         """Describe of an unknown template exits with error."""
@@ -577,6 +577,7 @@ class TestHelp:
         assert "render" in result.output
         assert "generate" in result.output
         assert "validate" in result.output
+        assert "check" in result.output
 
     def test_version_flag(self, runner: CliRunner) -> None:
         """``--version`` shows the version."""
@@ -586,7 +587,7 @@ class TestHelp:
 
     def test_command_help(self, runner: CliRunner) -> None:
         """Each subcommand has its own ``--help``."""
-        for cmd in ["list", "describe", "schema", "render", "generate", "validate"]:
+        for cmd in ["list", "describe", "schema", "render", "generate", "validate", "check"]:
             result = runner.invoke(main, [cmd, "--help"])
             assert result.exit_code == 0, f"{cmd} --help failed"
             assert result.output, f"{cmd} --help produced no output"
@@ -660,6 +661,107 @@ class TestRenderEdgeCases:
         assert "project-a" in r1.output
         assert "project-b" in r2.output
         assert r1.output != r2.output
+
+
+# ---------------------------------------------------------------------------
+# check
+# ---------------------------------------------------------------------------
+
+
+class TestCheckCommand:
+    """Tests for the ``templateer check`` command."""
+
+    def test_check_passes_for_sound_template(
+        self, runner: CliRunner, templates_arg: list[str]
+    ) -> None:
+        """A template that resists injection passes the audit."""
+        result = runner.invoke(main, ["check", "pyproject-uv", *templates_arg])
+        assert result.exit_code == 0
+        assert "escaping audit passed" in result.output
+
+    def test_check_unknown_template(self, runner: CliRunner, templates_arg: list[str]) -> None:
+        """Check of an unknown template exits with error."""
+        result = runner.invoke(main, ["check", "nonexistent", *templates_arg])
+        assert result.exit_code == 1
+
+
+# ---------------------------------------------------------------------------
+# Declared validators (Phase 10 regressions)
+# ---------------------------------------------------------------------------
+
+
+def _write_template_with_json_validator(tmp_path: Path, name: str = "tpl") -> Path:
+    """Create a minimal template whose output is TOML but which declares a
+    custom JSON parse validator.  The validator always fails on the TOML
+    artifact, so any command that runs declared validators must reject it.
+
+    Returns the directory to pass as ``--paths`` (the parent of the template).
+    """
+    search_root = tmp_path / "templates"
+    tdir = search_root / name
+    tdir.mkdir(parents=True)
+    (tdir / "metadata.yml").write_text(f"""\
+name: {name}
+description: A test template
+output:
+  path: out.txt
+  language: toml
+schema:
+  module: schema
+  class: TestModel
+prompt:
+  file: prompt.md
+renderer:
+  engine: minijinja
+  file: template.j2
+validators:
+  - kind: parse
+    language: json
+""", encoding="utf-8")
+    (tdir / "schema.py").write_text(
+        "from pydantic import BaseModel\n"
+        "class TestModel(BaseModel):\n"
+        "    name: str\n",
+        encoding="utf-8",
+    )
+    (tdir / "prompt.md").write_text("Fill TestModel.\n", encoding="utf-8")
+    (tdir / "template.j2").write_text('name = "{{ name }}"\n', encoding="utf-8")
+    return search_root
+
+
+class TestDeclaredValidators:
+    """Regression: the CLI must run the validators the template author
+    declared, and must not write unvalidated artifacts to disk."""
+
+    def test_cli_validate_runs_custom_validators(self, runner: CliRunner, tmp_path: Path) -> None:
+        """Regression: cli.validate passed language only, silently skipping
+        the validators the template author declared."""
+        tdir = _write_template_with_json_validator(tmp_path)
+        model_file = tmp_path / "model.json"
+        model_file.write_text(json.dumps({"name": "x"}), encoding="utf-8")
+
+        result = runner.invoke(main, [
+            "validate", "tpl", "--input", str(model_file), "--paths", str(tdir),
+        ])
+        assert result.exit_code == 1
+        assert "Custom parse (json)" in result.output
+
+    def test_render_command_validates_before_writing(
+        self, runner: CliRunner, tmp_path: Path
+    ) -> None:
+        """Regression: --output wrote unvalidated artifacts to disk."""
+        tdir = _write_template_with_json_validator(tmp_path)
+        model_file = tmp_path / "model.json"
+        model_file.write_text(json.dumps({"name": "x"}), encoding="utf-8")
+        out_file = tmp_path / "artifact.toml"
+
+        result = runner.invoke(main, [
+            "render", "tpl", "--input", str(model_file),
+            "--output", str(out_file), "--paths", str(tdir),
+        ])
+        assert result.exit_code == 1
+        assert not out_file.exists()
+        assert "Output validation failed" in result.output
 
 
 # ---------------------------------------------------------------------------

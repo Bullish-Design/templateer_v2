@@ -12,24 +12,19 @@ import ast
 import json
 import subprocess
 import tomllib
-from typing import Any
 
 import yaml
 
+from templateer.models import CommandValidator, ParseValidator
 
-class OutputValidationError(Exception):
-    """Raised when output validation fails."""
-
-    def __init__(self, errors: list[str]) -> None:
-        self.errors = errors
-        super().__init__("; ".join(errors))
+ValidatorSpec = ParseValidator | CommandValidator
 
 
 def validate_output(
     artifact: str,
     language: str,
-    validators: list[dict[str, Any]] | None = None,
-) -> list[str]:
+    validators: list[ValidatorSpec] | None = None,
+) -> tuple[list[str], list[str]]:
     """
     Validate a rendered artifact.
 
@@ -40,16 +35,13 @@ def validate_output(
         artifact: The rendered artifact text.
         language: Target language (toml, json, yaml, python).
         validators: Optional additional validators from template metadata.
-            Each validator dict must have a ``kind`` field ("parse" or "command").
-            - Parse validators: requires ``language`` field.
-            - Command validators: requires ``command`` field (list of str).
-            - Optional flag: ``optional`` (bool) — if True, failure is reported
-              but not included in the error list.
 
     Returns:
-        List of error messages. Empty list means all validators passed.
+        ``(errors, warnings)``.  Errors are fatal; warnings come from
+        validators declared ``optional: true``.
     """
     errors: list[str] = []
+    warnings: list[str] = []
 
     # Built-in parser validation based on target language
     parser_validators = {
@@ -68,51 +60,40 @@ def validate_output(
     # Custom validators from template metadata
     if validators:
         for validator in validators:
-            kind = validator.get("kind")
-            optional = validator.get("optional", False)
+            bucket = warnings if validator.optional else errors
 
-            if kind == "parse":
-                lang = validator.get("language")
-                if lang and lang in parser_validators:
+            if isinstance(validator, ParseValidator):
+                lang = validator.language
+                if lang in parser_validators:
                     try:
                         parser_validators[lang](artifact)
                     except Exception as e:
-                        msg = f"Custom parse ({lang}) failed: {e}"
-                        if not optional:
-                            errors.append(msg)
+                        bucket.append(f"Custom parse ({lang}) failed: {e}")
 
-            elif kind == "command":
-                cmd = validator.get("command", [])
-                if cmd:
-                    try:
-                        result = subprocess.run(
-                            cmd,
-                            input=artifact,
-                            capture_output=True,
-                            text=True,
-                            timeout=30,
-                        )
-                        if result.returncode != 0:
-                            stderr = result.stderr.strip()
-                            msg = f"Command '{' '.join(cmd)}' failed"
-                            if stderr:
-                                msg += f": {stderr}"
-                            if not optional:
-                                errors.append(msg)
-                    except FileNotFoundError:
-                        msg = f"Command '{' '.join(cmd)}' not found"
-                        if not optional:
-                            errors.append(msg)
-                    except subprocess.TimeoutExpired:
-                        msg = f"Command '{' '.join(cmd)}' timed out"
-                        if not optional:
-                            errors.append(msg)
-                    except Exception as e:
-                        msg = f"Command '{' '.join(cmd)}' error: {e}"
-                        if not optional:
-                            errors.append(msg)
+            elif isinstance(validator, CommandValidator):
+                cmd = validator.command
+                try:
+                    result = subprocess.run(
+                        cmd,
+                        input=artifact,
+                        capture_output=True,
+                        text=True,
+                        timeout=30,
+                    )
+                    if result.returncode != 0:
+                        stderr = result.stderr.strip()
+                        msg = f"Command '{' '.join(cmd)}' failed"
+                        if stderr:
+                            msg += f": {stderr}"
+                        bucket.append(msg)
+                except FileNotFoundError:
+                    bucket.append(f"Command '{' '.join(cmd)}' not found")
+                except subprocess.TimeoutExpired:
+                    bucket.append(f"Command '{' '.join(cmd)}' timed out")
+                except Exception as e:
+                    bucket.append(f"Command '{' '.join(cmd)}' error: {e}")
 
-    return errors
+    return errors, warnings
 
 
 def _validate_toml(text: str) -> None:

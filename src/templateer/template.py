@@ -39,7 +39,7 @@ class Template:
             raise TemplateLoadError(f"metadata.yml not found in {root}")
 
         try:
-            raw = yaml.safe_load(self._metadata_path.read_text())
+            raw = yaml.safe_load(self._metadata_path.read_text(encoding="utf-8"))
         except yaml.YAMLError as e:
             raise TemplateLoadError(f"Invalid YAML in {self._metadata_path}: {e}")
 
@@ -73,29 +73,42 @@ class Template:
         return self.metadata.description
 
     @property
-    def output_kind(self) -> str:
-        """Primary output kind (from first output spec)."""
-        return self.metadata.outputs[0].language if self.metadata.outputs else "unknown"
+    def output_language(self) -> str:
+        """Target language of the artifact this template generates."""
+        return self.metadata.output.language
 
     @property
     def trigger_paths(self) -> set[str]:
         """File paths this template can generate."""
-        return set(self.metadata.triggers.get("filenames", []))
+        return set(self.metadata.trigger_filenames)
 
     def resolve_path(self, relative: str) -> Path:
-        """Resolve a path relative to the template root."""
-        return (self.root / relative).resolve()
+        """Resolve a path relative to the template root.
+
+        Templates are self-contained: a path escaping the root is a template bug,
+        not a supported feature.
+        """
+        resolved = (self.root / relative).resolve()
+        if not resolved.is_relative_to(self.root.resolve()):
+            raise TemplateLoadError(
+                f"Template '{self.name}': path '{relative}' escapes the template root"
+            )
+        return resolved
 
     def load_prompt(self) -> str:
         """Load the prompt file contents."""
         prompt_path = self.resolve_path(self.metadata.prompt.file)
         if not prompt_path.exists():
             raise TemplateLoadError(f"Prompt file not found: {prompt_path}")
-        return prompt_path.read_text()
+        return prompt_path.read_text(encoding="utf-8")
 
     def load_schema_module(self) -> Any:
         """
         Dynamically load the schema Python module.
+
+        Note: ``sys.modules[spec_name]`` and ``_schema_class_cache`` persist for
+        the process lifetime, so editing a ``schema.py`` mid-session serves the
+        stale cached class.  Restart to pick up changes.
 
         Returns:
             The imported Python module object.
@@ -155,26 +168,25 @@ class Template:
         return cls.model_json_schema()
 
     def render(self, model: BaseModel) -> str:
-        """
-        Render this template with a validated model.
-
-        Args:
-            model: A validated Pydantic model instance.
-
-        Returns:
-            The rendered artifact text.
-
-        Raises:
-            RenderError: If rendering fails (undefined variable, missing template).
-        """
+        """Render this template with a validated model."""
         from templateer.renderer import render_template
 
-        template_file = self.resolve_path(self.metadata.renderer.file)
         return render_template(
-            template_file,
+            self.resolve_path(self.metadata.renderer.file),
             model,
-            strict=self.metadata.strict_context,
+            self.metadata.output.language,
         )
+
+    def load_example(self) -> str | None:
+        """Return the first example input fixture as JSON, if one exists.
+
+        Used as a few-shot exemplar for the LLM.  The fixture is already
+        schema-validated by the template's own tests.
+        """
+        fixtures = sorted((self.root / "examples").glob("*.input.json"))
+        if not fixtures:
+            return None
+        return fixtures[0].read_text(encoding="utf-8")
 
     def __repr__(self) -> str:
         return f"Template(name={self.name!r}, root={self.root!r})"
