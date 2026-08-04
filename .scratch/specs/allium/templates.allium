@@ -4,10 +4,60 @@
 --
 -- A template is a named capability that can generate a specific kind
 -- of artifact. Templates are loaded from the filesystem by directory,
--- where the directory name serves as the template identity.
+-- where the directory name serves as the template identity. Templates
+-- are self-contained: every referenced file lives inside the template
+-- root, and a path escaping the root is a template bug.
 --
--- Scope: Template definitions, catalog, and the Template Catalogue
+-- Scope: Template definitions, catalog, the deterministic template
+-- operations (render, validate, audit), and the Template Catalogue
 -- surface for browsing available templates.
+
+-- ============================================================================
+-- Given
+-- ============================================================================
+
+given {
+    catalog: TemplateCatalog
+}
+-- The template catalog is the collection of all available templates.
+-- It exists once per module scope. All rules inherit these bindings.
+
+
+-- ============================================================================
+-- External Entities
+-- ============================================================================
+
+external entity RequesterSession {
+    session_token: String
+    active: Boolean
+}
+-- The session context that identifies a Requester (human or agent).
+
+
+-- ============================================================================
+-- Value Types
+-- ============================================================================
+
+value OutputSpec {
+    path: String
+    language: String
+}
+-- What artifact a template generates: the target file path and the
+-- target language (toml, json, yaml, python, ...).
+
+value OutputValidator {
+    kind: parse | command
+    language: String?
+    command: List<String>?
+    optional: Boolean
+}
+-- A check applied to a rendered artifact. Parse validators parse the
+-- artifact in a target language; command validators run a command
+-- against it. A validator declared optional reports warnings rather
+-- than errors. Malformed declarations (a parse validator without a
+-- language, a command validator without a command, an unknown kind)
+-- fail at template load.
+
 
 -- ============================================================================
 -- Entities
@@ -22,55 +72,93 @@ entity Template {
     description: String
     -- What this template generates and when it should be used.
 
-    output_kind: String
-    -- The kind of artifact this template produces.
-    -- Examples: "toml", "yaml", "python", "dockerfile", "json", "markdown".
+    output: OutputSpec
+    -- The artifact this template generates (path + language).
 
-    trigger_paths: Set<String>
-    -- File paths this template can generate.
-    -- Examples: {"pyproject.toml"}, {".github/workflows/ci.yml"},
-    --           {"Dockerfile", "docker-compose.yml"}.
-    -- Used for template discovery: an agent can inspect available templates
-    -- and their trigger paths.
+    trigger_filenames: List<String>
+    -- Artifact paths this template can generate.
+    -- Examples: ["pyproject.toml"], [".github/workflows/ci.yml"].
+    -- Used for discovery: an agent can inspect available templates and
+    -- their trigger filenames.
+
+    validators: List<OutputValidator>
+    -- Optional output validators declared by the template author.
+
+    -- Derived
+    output_language: output.language
 }
 
-
--- ============================================================================
--- Given
--- ============================================================================
-
-given {
-    catalog: TemplateCatalog
-}
--- The template catalog is the collection of all available templates.
--- It exists once per module scope. All rules inherit these bindings.
 
 entity TemplateCatalog {
     templates: Set<Template>
 
     -- Derived: template lookup by name
     has_template(name): exists t in templates where t.name = name
+    find_template(name): Template{name}
 
     -- Projections
-    templates_by_output(kind): templates where output_kind = kind
+    templates_by_language(language): templates where output_language = language
 }
 
 
 -- ============================================================================
--- Actor declarations
+-- Rules
+-- ============================================================================
+
+rule RenderFromModel {
+    when: RenderFromTemplate(template_name, model_data)
+
+    requires: catalog.has_template(template_name)
+    requires: schema_validates(template_name, model_data)
+
+    ensures: ArtifactRendered(template_name, render_artifact(template_name, model_data))
+    @guidance
+        -- Deterministic, LLM-free rendering from validated model data.
+        -- model_data is validated against the template's schema before
+        -- rendering; an invalid model is rejected at the boundary. The
+        -- rendered artifact is output-validated before it reaches disk.
+}
+
+rule ValidateArtifactOutput {
+    when: ValidateArtifact(template_name, artifact)
+
+    requires: catalog.has_template(template_name)
+
+    ensures: ValidationReported(template_name, validate_artifact(artifact, template_name))
+    @guidance
+        -- Parses the artifact in the template's target language and runs
+        -- the template's declared validators. Returns error messages; an
+        -- empty list means the artifact is sound. Validators declared
+        -- optional report warnings rather than errors.
+}
+
+rule CheckTemplateAudit {
+    when: AuditTemplate(template_name)
+
+    requires: catalog.has_template(template_name)
+
+    ensures: AuditReported(template_name, audit_findings(template_name))
+    @guidance
+        -- The escaping audit: probes every string field of every example
+        -- fixture with a hostile payload, re-renders, and compares the
+        -- artifact's structure to the benign render. An injection changes
+        -- the artifact's key set; findings are reported per fixture and
+        -- field. Empty findings means the template is sound. Constrained
+        -- fields (literals, enums, patterns) reject the payload and are
+        -- skipped as structurally un-injectable.
+}
+
+
+-- ============================================================================
+-- Actors
 -- ============================================================================
 
 actor Requester {
-    identified_by: session_token
+    identified_by: RequesterSession where active = true
 }
 -- A requester is anyone (human or AI agent) who wants to generate
--- artifacts. Identified by a session token representing the context
--- they are working in — a project workspace, a CLI session, or an
--- API client.
---
--- Both humans and agents are Requesters. The system does not
--- distinguish between them at the domain level: both submit
--- requests, check status, and retrieve results.
+-- artifacts. Both humans and agents are Requesters: the system does not
+-- distinguish between them at the domain level.
 
 
 -- ============================================================================
@@ -84,8 +172,10 @@ surface TemplateCatalogue {
         for t in catalog.templates:
             t.name
             t.description
-            t.output_kind
-            t.trigger_paths
+            t.output.path
+            t.output_language
+            t.trigger_filenames
+            t.validators
 
     provides:
         BrowseTemplates()
@@ -94,15 +184,26 @@ surface TemplateCatalogue {
             when requester != null
         ShowSchema(name: String)
             when requester != null
+        RenderFromTemplate(template_name: String, model_data: Map<String, Any>)
+            when requester != null
+        ValidateArtifact(template_name: String, artifact: String)
+            when requester != null
+        AuditTemplate(template_name: String)
+            when requester != null
 
     @guidance
-        -- Read-only view of all available templates. Use this to
-        -- discover what templates exist and what they generate
-        -- before submitting a request through ArtifactWorkshop.
+        -- Read-only view of all available templates plus the deterministic
+        -- template operations. Use this to discover what templates exist
+        -- and what they generate before submitting a generation request
+        -- through ArtifactWorkshop.
         --
         -- DescribeTemplate returns template metadata (name, description,
-        -- output kind, trigger paths) for the named template.
+        -- output path + language, trigger filenames).
         -- ShowSchema returns the Pydantic schema for the named template.
+        -- RenderFromTemplate renders from validated model data (no LLM).
+        -- ValidateArtifact checks a rendered artifact against the
+        -- template's target language and declared validators.
+        -- AuditTemplate runs the escaping audit (templateer check).
 }
 
 

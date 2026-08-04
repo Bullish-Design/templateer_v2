@@ -3,39 +3,21 @@
 -- The generation lifecycle for Templateer V2.
 --
 -- A generation is the process of producing an artifact from a template.
--- The lifecycle:
---   1. Requester submits a generation request → Generation entity created
---   2. System resolves the template by name → moves to generating or fails
---   3. Artifact production completes → moves to ready or fails
---   4. Failed generations may be retried
+-- The pipeline is synchronous and result-oriented: submitting a request
+-- produces exactly one GenerationResult — success (with an artifact) or
+-- failure (with a reason and detail). There is no observable in-flight
+-- state; retries are internal to the pipeline and bounded by the
+-- request's max_attempts.
 --
 -- Key invariant: a renderer may only receive validated structured data.
 -- No raw LLM output, user prompt, or unrestricted filesystem context
 -- reaches the renderer. The intermediate model is the contract.
 --
--- Includes: Generation entity, rules, invariants, actors, and surfaces
--- for the artifact generation workshop and template catalogue.
+-- Includes: GenerationRequest/GenerationResult entities, rules,
+-- invariants, actors, and surfaces for the artifact generation
+-- workshop and template catalogue.
 
 use "./templates.allium" as templates
-
-
--- ============================================================================
--- Enumerations
--- ============================================================================
-
-enum FailureReason {
-    no_template
-    | model_validation_failed
-    | render_failed
-    | output_validation_failed
-    | llm_failed
-}
--- Taxonomy of generation failure reasons.
--- no_template:              the named template does not exist in the catalog
--- model_validation_failed:  the LLM output did not satisfy the Pydantic schema
--- render_failed:            the Jinja template referenced an undefined variable
--- output_validation_failed: the rendered artifact failed post-render validation
--- llm_failed:               the LLM did not return a usable response
 
 
 -- ============================================================================
@@ -51,51 +33,87 @@ value ProjectFacts {
 
 
 -- ============================================================================
+-- Enumerations
+-- ============================================================================
+
+enum FailureReason {
+    no_template
+    | config_error
+    | llm_failed
+    | model_validation_failed
+    | render_failed
+    | output_validation_failed
+}
+-- Taxonomy of generation failure reasons.
+-- no_template:              the named template does not exist in the catalog
+-- config_error:             caller misconfiguration (missing API key, unknown model id)
+-- llm_failed:               the LLM call itself failed (network, timeout, provider error)
+-- model_validation_failed:  the LLM could not produce output satisfying the schema
+-- render_failed:            the Jinja render step failed (schema/template drift, bad value)
+-- output_validation_failed: the rendered artifact failed output validation
+
+
+-- ============================================================================
 -- Entities
 -- ============================================================================
 
-entity Generation {
-    -- Request identity
-    requested_path: String
-    -- The artifact path the requester wants to generate.
-    -- Examples: "pyproject.toml", ".github/workflows/ci.yml", "Dockerfile"
-
+entity GenerationRequest {
     template_name: String
-    -- The template to use for this generation.
-    -- Must match a Template.name in the catalog, or the generation fails.
+    -- The template to use, matching a Template.name in the catalog exactly.
 
-    -- Lifecycle
-    status: submitted | generating | ready | failed
-    -- submitted:   request received, template not yet resolved
-    -- generating:  template resolved, system producing artifact
-    -- ready:       artifact produced and available
-    -- failed:      something went wrong
+    user_request: String
+    -- What the caller wants generated.
 
-    transitions status {
-        submitted -> generating
-        submitted -> failed
-        generating -> ready
-        generating -> failed
-        terminal: ready, failed
-    }
+    context: ProjectFacts?
+    -- Optional project facts passed to the LLM as context.
 
-    matched_template: templates/Template?
-    -- Set when a template is found. Remains null if lookup fails.
+    model_name: String
+    -- The LLM model identifier; defaults to config.default_model.
+
+    max_attempts: Integer
+    -- Whole-pipeline attempts; defaults to config.max_attempts.
+}
+-- A request is created once and re-run unchanged by internal retries.
+
+
+entity GenerationResult {
+    request: GenerationRequest
+    -- The request this result answers. Retries re-run the same request
+    -- with attempt incremented.
+
+    output_path: String?
+    -- Where the artifact belongs. Set once the template has resolved:
+    -- the artifact path comes from the template's metadata, not from the
+    -- requester. Null only when the template itself was not found.
+
+    model: Map<String, Any>?
+    -- The validated model dump. Present when the LLM produced a model,
+    -- regardless of later render/validation success.
 
     artifact: String?
-    -- The generated artifact content. Set when status becomes ready.
+    -- The rendered artifact. Present on success only.
 
     failure_reason: FailureReason?
-    -- Why the generation failed: no_template, model_validation_failed,
-    -- render_failed, output_validation_failed, or llm_failed.
+    -- Why the generation failed. Null on success.
 
-    retry_count: Integer
-    -- How many times this generation has been retried after failure.
+    error_detail: String?
+    -- Human-readable failure text. Present on failure only.
+
+    warnings: List<String>?
+    -- Non-fatal validator notes (validators declared optional). Absent
+    -- when there are none.
+
+    attempt: Integer
+    -- Which attempt produced this result (1-based).
 
     -- Derived
-    can_retry: status = failed and retry_count < config.max_retries
-    is_done: status in {ready, failed}
+    succeeded: failure_reason = null
+    can_retry: failure_reason in {llm_failed, model_validation_failed, output_validation_failed}
+        and attempt < request.max_attempts
 }
+-- A result is built once at the exit point of the pipeline, never mutated
+-- through a lifecycle. Success and failure are mutually exclusive by
+-- construction, enforced by the invariants below.
 
 
 -- ============================================================================
@@ -103,8 +121,13 @@ entity Generation {
 -- ============================================================================
 
 config {
-    max_retries: Integer = 3
+    default_model: String = "openai:gpt-4.1-mini"
+    max_attempts: Integer = 3
+    model_output_retries: Integer = 2
 }
+-- model_output_retries is the LLM provider's *internal* budget for
+-- re-asking the model when its output fails schema validation. It is
+-- distinct from max_attempts, which re-runs the whole pipeline.
 
 
 -- ============================================================================
@@ -116,114 +139,153 @@ config {
 -- -----------------------------------------------------------
 
 rule SubmitGeneration {
-    when: GenerateArtifact(
-        requested_path,
-        template_name,
-        user_intent,
-        project_facts
-    )
+    when: GenerateArtifact(template_name, user_request, context?, model_name?, max_attempts?)
 
-    ensures: Generation.created(
-        requested_path: requested_path,
-        template_name: template_name,
-        status: submitted,
-        retry_count: 0
-    )
-    ensures: TaskStarted(
-        what: artifact_generation,
-        path: requested_path,
-        template: template_name
-    )
+    ensures:
+        let request = GenerationRequest.created(
+            template_name: template_name,
+            user_request: user_request,
+            context: context,
+            model_name: model_name ?? config.default_model,
+            max_attempts: max_attempts ?? config.max_attempts
+        )
+        GenerationAttempted(request, 1)
     @guidance
-        -- The requester specifies which template to use by name.
-        -- user_intent and project_facts are passed to the LLM as
-        -- black box context but are not tracked on the entity.
+        -- The caller names the template and describes the request. The
+        -- artifact path is NOT caller-supplied: it is fixed by the chosen
+        -- template's metadata (output.path).
 }
 
 -- -----------------------------------------------------------
--- 2. Template resolution
+-- 2. Template resolution (exact name match)
 -- -----------------------------------------------------------
 
 rule ResolveTemplate {
-    when: gen: Generation.status becomes submitted
+    when: GenerationAttempted(request, attempt)
 
-    requires: gen.status = submitted
-    requires: gen.template_name != null
+    requires: templates/catalog.has_template(request.template_name)
 
-    let found = templates/catalog.has_template(gen.template_name)
+    ensures: ProductionRequested(
+        request: request,
+        attempt: attempt,
+        template: templates/catalog.find_template(request.template_name)
+    )
+    @guidance
+        -- Template lookup is exact name match only. The template_name must
+        -- match a Template.name in the catalog; a template that fails to
+        -- load (missing or invalid metadata) is also classified as
+        -- no_template by FailNoTemplate.
+}
+
+rule FailNoTemplate {
+    when: GenerationAttempted(request, attempt)
+
+    requires: not templates/catalog.has_template(request.template_name)
+
+    ensures: GenerationResult.created(
+        request: request,
+        attempt: attempt,
+        failure_reason: no_template,
+        error_detail: "no template found with that name"
+    )
+    @guidance
+        -- Permanent failure: retrying burns tokens to reach the same
+        -- answer, so no_template is never retried.
+}
+
+-- -----------------------------------------------------------
+-- 3. Model generation (external LLM process)
+-- -----------------------------------------------------------
+
+-- The LLM provider is an external process. In response to
+-- ProductionRequested it emits exactly one of:
+--   ModelReady(request, attempt, template, model)
+--   ModelFailed(request, attempt, template, reason, detail)
+-- where reason is one of config_error | llm_failed |
+-- model_validation_failed.
+
+rule FailModelGeneration {
+    when: ModelFailed(request, attempt, template, reason, detail)
+
+    requires: template != null
+    requires: reason in {config_error, llm_failed, model_validation_failed}
+
+    ensures: GenerationResult.created(
+        request: request, output_path: template.output.path,
+        attempt: attempt, failure_reason: reason, error_detail: detail
+    )
+    @guidance
+        -- The provider classifies its own failure:
+        --   config_error:            caller misconfiguration — missing API
+        --     key, unknown model id. Permanent, never retried.
+        --   model_validation_failed: the model's output could not satisfy
+        --     the schema after the provider's internal re-ask budget
+        --     (config.model_output_retries). Retryable.
+        --   llm_failed:              network, timeout, provider error.
+        --     Retryable.
+        -- The validated model — when it exists — is the only thing that
+        -- crosses from the LLM into the render step.
+}
+
+-- -----------------------------------------------------------
+-- 4. Render + validate the artifact
+-- -----------------------------------------------------------
+
+rule RenderArtifact {
+    when: ModelReady(request, attempt, template, model)
+
+    requires: template != null
+
+    let artifact = render(template, model)
+    let errors = validate_errors(artifact, template.output.language, template.validators)
+    let warnings = validate_warnings(artifact, template.output.language, template.validators)
 
     ensures:
-        if found:
-            gen.status = generating
-            gen.matched_template =
-                templates/catalog.find_template(gen.template_name)
+        if artifact = null:
+            GenerationResult.created(
+                request: request, output_path: template.output.path,
+                attempt: attempt, model: model,
+                failure_reason: render_failed,
+                error_detail: render_detail(template, model))
+        else if errors.count > 0:
+            GenerationResult.created(
+                request: request, output_path: template.output.path,
+                attempt: attempt, model: model,
+                failure_reason: output_validation_failed,
+                error_detail: join(errors, "; "))
         else:
-            gen.status = failed
-            gen.failure_reason = no_template
+            GenerationResult.created(
+                request: request, output_path: template.output.path,
+                attempt: attempt, model: model,
+                artifact: artifact, warnings: warnings)
     @guidance
-        -- Template lookup is exact name match only. The template_name
-        -- must match a Template.name in the catalog. If no template
-        -- with that name exists, the generation fails immediately with
-        -- reason no_template.
+        -- render(template, model) is deterministic: the same validated
+        -- model and template produce byte-identical output. It returns
+        -- null when the template cannot be rendered — schema/template
+        -- drift, an undefined variable, or a value that cannot be safely
+        -- interpolated (interpolating a null value is an authoring error).
+        --
+        -- Output validation parses the artifact in the target language
+        -- and runs the template's declared validators. Validators marked
+        -- optional report warnings rather than errors.
 }
 
 -- -----------------------------------------------------------
--- 3. Artifact completion
--- -----------------------------------------------------------
-
-rule DeliverArtifact {
-    when: ArtifactReady(generation, artifact)
-
-    requires: exists generation
-    requires: generation.status = generating
-
-    ensures: generation.status = ready
-    ensures: generation.artifact = artifact
-    @guidance
-        -- The artifact production process (LLM model filling + Jinja
-        -- rendering) is modelled as an external black box. When it
-        -- completes successfully, it emits ArtifactReady with the
-        -- rendered artifact. The generation transitions to ready.
-}
-
--- -----------------------------------------------------------
--- 4. Generation failure
--- -----------------------------------------------------------
-
-rule FailGeneration {
-    when: GenerationError(generation, reason)
-
-    requires: exists generation
-    requires: generation.status = generating
-
-    ensures: generation.status = failed
-    ensures: generation.failure_reason = reason
-    @guidance
-        -- Catches failures from the artifact production process.
-        -- The reason describes what went wrong (model validation,
-        -- render failure, output validation, LLM error).
-}
-
--- -----------------------------------------------------------
--- 5. Retry
+-- 5. Retry (internal to the pipeline)
 -- -----------------------------------------------------------
 
 rule RetryFailedGeneration {
-    when: RetryGeneration(generation)
+    when: result: GenerationResult.created
 
-    requires: exists generation
-    requires: generation.can_retry
+    requires: result.can_retry
 
-    ensures: generation.status = submitted
-    ensures: generation.failure_reason = null
-    ensures: generation.retry_count = generation.retry_count + 1
-    ensures: generation.artifact = null
-    ensures: generation.matched_template = null
+    ensures: GenerationAttempted(result.request, result.attempt + 1)
     @guidance
-        -- A failed generation can be retried up to config.max_retries
-        -- times. The retry resets the generation to submitted state,
-        -- clearing the failure and artifact, so the resolution and
-        -- production rules fire again.
+        -- Retrying only helps for nondeterministic failures: llm_failed,
+        -- model_validation_failed and output_validation_failed. Missing
+        -- templates, missing API keys, and broken templates are permanent
+        -- and never retried. There is no caller-invoked retry; the loop is
+        -- internal and the final result carries the attempt count.
 }
 
 
@@ -231,30 +293,35 @@ rule RetryFailedGeneration {
 -- Invariants
 -- ============================================================================
 
-invariant ArtifactImpliesReady {
-    for gen in Generations:
-        gen.artifact != null implies gen.status = ready
+invariant ArtifactImpliesSuccess {
+    for r in GenerationResults:
+        r.artifact != null implies r.failure_reason = null
 }
--- An artifact is only set when the generation has completed successfully.
+-- An artifact is only present on success.
+
+invariant SuccessImpliesArtifact {
+    for r in GenerationResults:
+        r.failure_reason = null implies r.artifact != null
+}
+-- Every successful result carries its artifact.
 
 invariant FailureImpliesReason {
-    for gen in Generations:
-        gen.status = failed implies gen.failure_reason != null
+    for r in GenerationResults:
+        r.failure_reason != null implies r.error_detail != null
 }
--- Every failed generation has an explanation of why.
+-- Every failed result explains why.
 
-invariant TemplateOnlyAfterMatch {
-    for gen in Generations:
-        gen.matched_template != null
-            implies gen.status in {generating, ready, failed}
+invariant FailureExcludesArtifact {
+    for r in GenerationResults:
+        r.failure_reason != null implies r.artifact = null
 }
--- A template is only matched during or after generation.
+-- Failure and artifact are mutually exclusive.
 
-invariant ReadyImpliesArtifact {
-    for gen in Generations:
-        gen.status = ready implies gen.artifact != null
+invariant AttemptWithinBudget {
+    for r in GenerationResults:
+        r.attempt <= r.request.max_attempts
 }
--- A completed generation always has its artifact available.
+-- The retry loop never exceeds the request's max_attempts.
 
 
 -- ============================================================================
@@ -265,55 +332,66 @@ surface ArtifactWorkshop {
     facing requester: templates/Requester
 
     exposes:
-        for g in Generations:
-            g.requested_path
-            g.template_name
-            g.status
-            g.failure_reason
-            g.retry_count
-            g.matched_template.name
-                when g.matched_template != null
-            g.is_done
-            g.can_retry
-            g.artifact
-                when g.status = ready
+        for r in GenerationResults:
+            r.request.template_name
+            r.output_path
+            r.model
+            r.artifact
+                when r.succeeded
+            r.failure_reason
+            r.error_detail
+            r.warnings
+            r.attempt
+            r.succeeded
+            r.can_retry
 
     provides:
         GenerateArtifact(
-            requested_path: String,
             template_name: String,
-            user_intent: String?,
-            project_facts: ProjectFacts?
+            user_request: String,
+            context: ProjectFacts?,
+            model_name: String?,
+            max_attempts: Integer?
         ) when requester != null
-        RetryGeneration(g)
-            when g.can_retry
 
     related:
         templates/TemplateCatalogue()
             when requester != null
 
     @guarantee StrictRenderContract
-        -- The generated artifact is produced only from validated
-        -- structured data. No raw LLM response, user prompt, or
-        -- unrestricted context reaches the renderer. The Pydantic
-        -- model is the sole interface between the LLM and the
-        -- rendering step.
+        -- The renderer receives only the validated model's data dump. No
+        -- raw LLM response, user prompt, or unrestricted context reaches
+        -- the template. Undefined template variables are errors, never
+        -- silent empty strings.
 
     @guarantee DeterministicRender
-        -- Given the same template and the same structured model
-        -- data, rendering produces byte-identical output.
+        -- Given the same template and the same validated model data,
+        -- rendering produces byte-identical output.
+
+    @guarantee EscapedInterpolation
+        -- Every value interpolated into an artifact is escaped for the
+        -- target language at the render boundary, so a validated model
+        -- cannot alter the artifact's structure: a value that lexes like
+        -- string syntax (quotes, newlines, comments) round-trips as data.
+        -- The escaping audit (AuditTemplate) probes every string field of
+        -- every example fixture and reports zero findings.
+
+    @guarantee FailuresAreResults
+        -- Every generation outcome is a GenerationResult. A failure is
+        -- data (failure_reason + error_detail), never an exception
+        -- escaping the pipeline boundary.
 
     @guidance
         -- The requester identifies a template by name (directory name).
-        -- Matching is exact: either a template with that name exists
-        -- or it doesn't. No scoring, no confidence, no fuzzy matching.
+        -- Matching is exact: either a template with that name exists or it
+        -- doesn't. No scoring, no confidence, no fuzzy matching.
         --
         -- To generate an artifact:
         --   1. Browse TemplateCatalogue to see what's available
-        --   2. Call GenerateArtifact(path, template_name, intent, facts)
-        --   3. Poll g.artifact when g.is_done = true
-        --   4. If g.status = failed and g.can_retry = true,
-        --      call RetryGeneration(g)
+        --   2. Call GenerateArtifact(template_name, user_request, ...)
+        --   3. Read r.artifact on success, or r.failure_reason +
+        --      r.error_detail on failure. Retries are internal; the result
+        --      reports the final attempt.
 }
 
 
@@ -321,7 +399,7 @@ surface ArtifactWorkshop {
 -- Open questions
 -- ============================================================================
 
-open question "Should Generations be removed after delivery, or retained as history?"
+open question "Should completed results be retained for history or audit, or discarded after delivery?"
 open question "Should ProjectFacts be template-specific value types instead of a generic key-value map?"
 open question "Should there be a TemplateCustodian actor for template lifecycle management (add, remove, update templates)?"
 open question "Should the surface distinguish between human and agent requesters, or are they identical as the spec assumes?"
