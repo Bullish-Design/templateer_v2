@@ -583,7 +583,7 @@ class TestHelp:
         """``--version`` shows the version."""
         result = runner.invoke(main, ["--version"])
         assert result.exit_code == 0
-        assert "0.1.0" in result.output
+        assert "0.2.0" in result.output
 
     def test_command_help(self, runner: CliRunner) -> None:
         """Each subcommand has its own ``--help``."""
