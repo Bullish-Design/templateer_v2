@@ -40,7 +40,7 @@ from templateer.generator import DEFAULT_MODEL
 from templateer.pipeline import generate
 from templateer.result import GenerationRequest, GenerationResult
 from templateer.template import Template
-from templateer.validators import validate_output
+from templateer.validators import effective_validators, validate_output
 
 
 class TemplateRegistry:
@@ -219,7 +219,9 @@ class TemplateRegistry:
         """
         template = self._catalog.get(template_name)
         errors, _ = validate_output(
-            artifact, template.output_language, template.metadata.validators
+            artifact,
+            template.output_language,
+            effective_validators(template.metadata.output, template.metadata.validators),
         )
         return errors
 

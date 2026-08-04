@@ -2,7 +2,7 @@
 
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class ParseValidator(BaseModel):
@@ -25,10 +25,20 @@ class CommandValidator(BaseModel):
     optional: bool = False
 
 
+class MarkdownValidator(BaseModel):
+    """Validates the artifact as a fenced YAML region payload."""
+
+    model_config = {"extra": "forbid"}
+
+    kind: Literal["markdown"]
+    optional: bool = False
+
+
 # Discriminated by ``kind``: malformed validator metadata fails at template
 # load instead of silently no-oping at validation time.
 OutputValidator = Annotated[
-    ParseValidator | CommandValidator, Field(discriminator="kind")
+    ParseValidator | CommandValidator | MarkdownValidator,
+    Field(discriminator="kind"),
 ]
 
 
@@ -54,11 +64,47 @@ class RendererRef(BaseModel):
     file: str = Field(description="Path to Jinja template file relative to template root")
 
 
+class RegionBoundary(BaseModel):
+    """The page region a ``kind: "region"`` template may be spliced into.
+
+    The consumer owns the fences and the surrounding page; this declares the
+    bounded slot: which page, which ``$ref``'d block's payload the template
+    replaces, and which annotation it resolves.
+    """
+
+    model_config = {"extra": "forbid"}
+
+    page: str = Field(description="Hosting page name (or page-name pattern)")
+    ref: str = Field(description="The data block's $ref — the payload this region owns")
+    anchor: str | None = Field(
+        default=None,
+        description="Annotation ref recorded in the block's addressed: list",
+    )
+
+
 class OutputSpec(BaseModel):
     """What artifact this template generates."""
 
-    path: str = Field(description="Target file path, e.g. 'pyproject.toml'")
+    path: str = Field(
+        description=(
+            "Target file path; for kind=region this is informational — "
+            "region.page is the real anchor"
+        )
+    )
     language: str = Field(description="Target language: toml, yaml, json, python, ...")
+    kind: Literal["full_file", "region"] = "full_file"
+    region: RegionBoundary | None = Field(
+        default=None,
+        description="Required iff kind=region; forbidden for full_file",
+    )
+
+    @model_validator(mode="after")
+    def _kind_region_consistency(self) -> "OutputSpec":
+        if self.kind == "region" and self.region is None:
+            raise ValueError("kind='region' requires a region boundary")
+        if self.kind == "full_file" and self.region is not None:
+            raise ValueError("kind='full_file' must not carry a region boundary")
+        return self
 
 
 class TemplateMetadata(BaseModel):

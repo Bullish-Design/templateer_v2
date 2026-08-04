@@ -78,6 +78,11 @@ class Template:
         return self.metadata.output.language
 
     @property
+    def output_kind(self) -> str:
+        """What kind of artifact this template produces: full_file or region."""
+        return self.metadata.output.kind
+
+    @property
     def trigger_paths(self) -> set[str]:
         """File paths this template can generate."""
         return set(self.metadata.trigger_filenames)

@@ -27,7 +27,7 @@ from templateer.generator import DEFAULT_MODEL
 from templateer.pipeline import generate
 from templateer.result import GenerationRequest
 from templateer.template import Template, TemplateLoadError, TemplateNotFoundError
-from templateer.validators import validate_output
+from templateer.validators import effective_validators, validate_output
 
 # ---------------------------------------------------------------------------
 # Path resolution helpers
@@ -188,6 +188,12 @@ def describe_template(template_name: str, paths: tuple[str, ...]) -> None:
     click.echo(f"Trigger paths: {template.trigger_paths}")
     output = template.metadata.output
     click.echo(f"  Generates: {output.path} ({output.language})")
+    if output.kind == "region" and output.region is not None:
+        anchor = output.region.anchor or "-"
+        click.echo(
+            f"  Region: page={output.region.page} "
+            f"ref={output.region.ref} anchor={anchor}"
+        )
 
 
 @main.command("schema")
@@ -259,7 +265,9 @@ def render_from_model(
 
     # Validate the rendered artifact before it can reach disk
     errors, warnings = validate_output(
-        rendered, template.output_language, template.metadata.validators
+        rendered,
+        template.output_language,
+        effective_validators(template.metadata.output, template.metadata.validators),
     )
     for warning in warnings:
         click.echo(f"Warning: {warning}", err=True)
@@ -436,7 +444,9 @@ def validate_output_command(
 
     # Run output validators, including custom ones from metadata
     errors, warnings = validate_output(
-        rendered, template.output_language, template.metadata.validators
+        rendered,
+        template.output_language,
+        effective_validators(template.metadata.output, template.metadata.validators),
     )
     for warning in warnings:
         click.echo(f"Warning: {warning}", err=True)

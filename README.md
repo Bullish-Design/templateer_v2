@@ -214,6 +214,14 @@ description: What this template generates and when to use it.
 output:
   path: output.txt
   language: toml       # toml, json, yaml, python, ...
+  kind: full_file      # full_file (default) | region — see “Region outputs” below
+
+# For kind: region templates, declare the bounded slot (required iff
+# kind is region; forbidden for full_file):
+#   region:
+#     page: docs/status.md   # hosting page name (or page-name pattern)
+#     ref: $block-status     # the data block's $ref whose payload this replaces
+#     anchor: $fix-tuesday   # optional annotation ref recorded in addressed:
 
 schema:
   module: schema         # Python module name (without .py)
@@ -236,6 +244,10 @@ trigger_filenames:
 #   - kind: command
 #     command: ["python", "-m", "ruff", "check", "-"]
 #     optional: true
+#   - kind: markdown
+#     # fence balance, single-document YAML, structured payload,
+#     # round-trip stability, duplicate-key rejection (enforced
+#     # automatically for kind: region templates)
 ```
 
 `extra="forbid"` is enforced on metadata: malformed validator metadata, the
@@ -301,6 +313,50 @@ Create `examples/scenario.input.json` and `examples/scenario.output.txt`, then v
 ```bash
 uv run templateer validate my-template --input examples/scenario.input.json
 ```
+
+### Region outputs (`kind: region`)
+
+By default a template produces a **whole file** (`kind: full_file`): its
+artifact is the complete contents of `output.path`.  A template can instead
+declare that it produces a **bounded payload** for one fenced data block of a
+page (`kind: region`):
+
+```yaml
+output:
+  path: docs/status.md        # informational; region.page is the real anchor
+  language: yaml
+  kind: region
+  region:
+    page: docs/status.md      # hosting page name (or page-name pattern)
+    ref: $block-status        # the $ref'd block whose payload this replaces
+    anchor: $fix-tuesday      # optional annotation ref (addressed: list)
+```
+
+The kind/`region` coupling is enforced at **template load** (not render time):
+`kind: region` without a `region:` block fails to load, and `kind: full_file`
+with a `region:` block fails too.
+
+**The body-only contract:** a region template's artifact is the *bare YAML
+payload* — the page owns the fences.  The consumer splices the payload into
+the block via its `replace_range` (the block's `CodeText` span), leaving the
+fence and the surrounding human zone untouched.  Templateer renders and
+*validates* the payload; it never writes regions (or files).
+
+**The markdown validator.** `kind: "markdown"` checks fence balance,
+single-document YAML, a structured payload (mapping or list — bare scalars
+and empty payloads are rejected), round-trip stability, and duplicate-key
+rejection (PyYAML silently keeps the last duplicate; a swapped payload must
+not corrupt meaning silently).  For `kind: region` templates the check is
+**enforced automatically** — it is the safety property the kind exists to
+declare, so it cannot be omitted or turned off by a template author.  It is
+prepended to whatever validators the template declares (an explicit
+`kind: markdown` is not duplicated), so a broken block fails the generation
+with `output_validation_failed`.
+
+Safety semantics: templateer declares the boundary and validates the
+artifact; the bounded write is the consumer's `replace_range`.  See the
+region write-back seam in the argentic.space event-driven pipeline concept
+(§5.3 owned regions, §5.4 the `kind: "region"` seam) for the consumer side.
 
 ### Schema Design Rules
 

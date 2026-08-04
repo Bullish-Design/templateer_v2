@@ -19,7 +19,7 @@ from templateer.generator import generate_model
 from templateer.renderer import RenderError
 from templateer.result import FailureReason, GenerationRequest, GenerationResult
 from templateer.template import Template, TemplateLoadError, TemplateNotFoundError
-from templateer.validators import validate_output
+from templateer.validators import effective_validators, validate_output
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +59,11 @@ def _attempt(
         return fail(FailureReason.NO_TEMPLATE, str(e))
 
     output_path = template.metadata.output.path
+    region = template.metadata.output.region
+    # A region template's failures are grounded in the page it lives on;
+    # ``path`` is informational for regions, ``region.page`` is the anchor.
+    if template.metadata.output.kind == "region" and region is not None:
+        output_path = region.page
 
     # 2 — Generate the model ----------------------------------------------
     #
@@ -96,7 +101,11 @@ def _attempt(
 
     # 4 — Validate the artifact -------------------------------------------
     errors, warnings = validate_output(
-        artifact, template.metadata.output.language, template.metadata.validators
+        artifact,
+        template.metadata.output.language,
+        effective_validators(
+            template.metadata.output, template.metadata.validators
+        ),
     )
     if errors:
         return fail(FailureReason.OUTPUT_VALIDATION_FAILED, "; ".join(errors),
