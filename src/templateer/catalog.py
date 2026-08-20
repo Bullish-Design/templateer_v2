@@ -13,6 +13,12 @@ class TemplateCatalog:
 
     def __init__(self) -> None:
         self._templates: dict[str, Template] = {}
+        self.load_errors: list[tuple[str, str]] = []
+        """Templates that failed to load: ``(template_dir_name, message)``.
+
+        A broken template is skipped, not fatal.  This list keeps the failure
+        visible, so a caller can tell "broken" from "absent".
+        """
 
     @property
     def templates(self) -> list[Template]:
@@ -27,11 +33,11 @@ class TemplateCatalog:
         Templates are indexed by name (directory name). If a template with
         the same name appears in multiple paths, the first one wins.
 
+        A template that fails to load is skipped and recorded in
+        ``load_errors``.  This call does not raise for a broken template.
+
         Args:
             paths: List of directories to scan for templates.
-
-        Raises:
-            TemplateLoadError: If a template directory has invalid structure.
         """
         for path in paths:
             if not path.exists():
@@ -47,6 +53,7 @@ class TemplateCatalog:
                             template = Template(entry)
                             self._templates[template.name] = template
                         except TemplateLoadError as e:
+                            self.load_errors.append((entry.name, str(e)))
                             logger.warning("Skipping template %s: %s", entry.name, e)
 
     def has_template(self, name: str) -> bool:
@@ -69,10 +76,6 @@ class TemplateCatalog:
         if name not in self._templates:
             raise TemplateNotFoundError(f"No template found with name: {name}")
         return self._templates[name]
-
-    def templates_by_language(self, language: str) -> list[Template]:
-        """Find templates that produce a given output language."""
-        return [t for t in self._templates.values() if t.output_language == language]
 
     def __len__(self) -> int:
         return len(self._templates)

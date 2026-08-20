@@ -473,13 +473,19 @@ def validate_output_command(
 def check_template(template_name: str, paths: tuple[str, ...]) -> None:
     """Audit a template: fixtures render, parse, and resist injection."""
     template = _get_template_or_exit(template_name, paths)
-    findings = audit_template(template)
-    if findings:
-        click.echo(f"✗ {len(findings)} finding(s):", err=True)
-        for finding in findings:
+    report = audit_template(template)
+    if report.findings:
+        click.echo(f"✗ {len(report.findings)} finding(s):", err=True)
+        for finding in report.findings:
             click.echo(f"  - {finding}", err=True)
         sys.exit(1)
-    click.echo("✓ escaping audit passed")
+    if not report.audited:
+        click.echo(f"⚠ nothing audited: {report.skipped_reason}", err=True)
+        sys.exit(1)
+    click.echo(
+        f"✓ {report.fields_probed} probes across {report.fixtures_seen} fixture(s), "
+        f"{report.sites_linted} site(s) linted, 0 findings"
+    )
 
 
 # ---------------------------------------------------------------------------

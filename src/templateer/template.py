@@ -1,14 +1,18 @@
 """Template loading and representation."""
 
 import importlib.util
+import json
+import logging
 import sys
 from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from templateer.models import TemplateMetadata
+
+logger = logging.getLogger(__name__)
 
 
 class TemplateLoadError(Exception):
@@ -78,11 +82,6 @@ class Template:
         return self.metadata.output.language
 
     @property
-    def output_kind(self) -> str:
-        """What kind of artifact this template produces: full_file or region."""
-        return self.metadata.output.kind
-
-    @property
     def trigger_paths(self) -> set[str]:
         """File paths this template can generate."""
         return set(self.metadata.trigger_filenames)
@@ -111,6 +110,10 @@ class Template:
         """
         Dynamically load the schema Python module.
 
+        The schema module is the one file this library executes.  Its path goes
+        through ``resolve_path``, so a module outside the template root is a
+        load error, the same as an escaping ``prompt.file`` or ``renderer.file``.
+
         Note: ``sys.modules[spec_name]`` and ``_schema_class_cache`` persist for
         the process lifetime, so editing a ``schema.py`` mid-session serves the
         stale cached class.  Restart to pick up changes.
@@ -119,10 +122,11 @@ class Template:
             The imported Python module object.
 
         Raises:
-            TemplateLoadError: If the schema file cannot be found or loaded.
+            TemplateLoadError: If the schema file escapes the template root, is
+                missing, or cannot be loaded.
         """
         module_name = self.metadata.schema_ref.module
-        schema_file = self.root / f"{module_name}.py"
+        schema_file = self.resolve_path(f"{module_name}.py")
 
         if not schema_file.exists():
             raise TemplateLoadError(f"Schema file not found: {schema_file}")
@@ -134,8 +138,10 @@ class Template:
             raise TemplateLoadError(f"Cannot load schema module from {schema_file}")
 
         module = importlib.util.module_from_spec(spec)
-        sys.modules[spec_name] = module
+        # Register only after the module runs.  A module that raises during
+        # import must not stay in sys.modules half-initialized.
         spec.loader.exec_module(module)
+        sys.modules[spec_name] = module
         return module
 
     def get_schema_class(self) -> type[BaseModel]:
@@ -183,15 +189,58 @@ class Template:
         )
 
     def load_example(self) -> str | None:
-        """Return the first example input fixture as JSON, if one exists.
+        """Return one schema-valid example input fixture as JSON, if one exists.
 
-        Used as a few-shot exemplar for the LLM.  The fixture is already
-        schema-validated by the template's own tests.
+        The fixture becomes a few-shot exemplar in the LLM prompt.  Selection is
+        by name, not by accident of spelling: ``examples/<template-name>.input.json``
+        first, then the first ``*.input.json`` in alphabetical order.
+
+        This method validates the exemplar against the template schema.  Nothing
+        else does; "the template's own tests validate it" is an assumption about
+        tests existing, not an invariant.  A wrong exemplar teaches the model the
+        wrong shape, so a fixture that is not valid JSON, or that fails schema
+        validation, is skipped: this method logs a warning and returns ``None``.
+        A prompt with no exemplar is better than a prompt with a wrong one.
+
+        Returns:
+            The fixture text, or ``None`` if there is no usable fixture.
+
+        Raises:
+            TemplateLoadError: If the schema class cannot be loaded.
         """
         fixtures = sorted((self.root / "examples").glob("*.input.json"))
         if not fixtures:
             return None
-        return fixtures[0].read_text(encoding="utf-8")
+
+        preferred = self.root / "examples" / f"{self.name}.input.json"
+        fixture = preferred if preferred.is_file() else fixtures[0]
+        text = fixture.read_text(encoding="utf-8")
+
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError as e:
+            logger.warning(
+                "Template '%s': example fixture '%s' is not valid JSON (%s). "
+                "The prompt carries no exemplar.",
+                self.name,
+                fixture.name,
+                e,
+            )
+            return None
+
+        try:
+            self.get_schema_class().model_validate(data)
+        except ValidationError as e:
+            logger.warning(
+                "Template '%s': example fixture '%s' does not validate against "
+                "the schema (%s). The prompt carries no exemplar.",
+                self.name,
+                fixture.name,
+                e,
+            )
+            return None
+
+        return text
 
     def __repr__(self) -> str:
         return f"Template(name={self.name!r}, root={self.root!r})"
