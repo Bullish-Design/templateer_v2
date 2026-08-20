@@ -39,6 +39,18 @@ def pytest_configure(config: pytest.Config) -> None:
     )
 
 
+@pytest.fixture(autouse=True)
+def _no_retry_backoff(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Remove the LLM_FAILED retry backoff for every test.
+
+    ``pipeline.RETRY_BACKOFF_SECONDS`` doubles per attempt, so three attempts
+    cost three seconds of real time.  A test that measures the repair loop
+    must not also measure the clock.  ``tests/test_surface.py`` asserts the
+    backoff schedule directly, with a recorded sleep instead of a real one.
+    """
+    monkeypatch.setattr("templateer.pipeline.RETRY_BACKOFF_SECONDS", 0.0)
+
+
 DEFAULT_SCHEMA_SOURCE = """\
 from pydantic import BaseModel
 

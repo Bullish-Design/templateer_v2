@@ -116,6 +116,57 @@ def test_attempt_two_prompt_differs_and_carries_attempt_ones_error(
 
 
 @pytest.mark.finding_a9
+def test_backoff_applies_to_llm_failure_only(
+    make_template: Callable[..., Path],
+    stub_model_generation: Callable[..., list[dict]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A provider error is the one retryable failure that waiting can fix.
+
+    ``conftest`` zeroes the backoff for every other test, so this is the only
+    place the schedule is checked.  The sleep is recorded, never taken.
+    """
+    import templateer.pipeline as pipeline_module
+
+    slept: list[float] = []
+
+    async def _record(seconds: float) -> None:
+        slept.append(seconds)
+
+    monkeypatch.setattr(pipeline_module.asyncio, "sleep", _record)
+    monkeypatch.setattr(pipeline_module, "RETRY_BACKOFF_SECONDS", 1.0)
+
+    # An artifact that does not parse: OUTPUT_VALIDATION_FAILED, which the
+    # repair loop fixes by changing the prompt.  Waiting buys nothing.
+    template_dir = _bad_toml_template(make_template)
+    stub_model_generation(
+        lambda template, attempt: template.get_schema_class()(x="hi")
+    )
+    pipeline_module.generate(
+        _catalog(template_dir),
+        GenerationRequest(
+            template_name="badtoml", user_request="x", max_attempts=3
+        ),
+    )
+    assert slept == [], "a repairable failure must not wait"
+
+    # A provider error: LLM_FAILED, doubling per attempt.
+    slept.clear()
+
+    def _boom(template: Template, attempt: int) -> Any:
+        raise RuntimeError("provider exploded")
+
+    stub_model_generation(_boom)
+    pipeline_module.generate(
+        _catalog(template_dir),
+        GenerationRequest(
+            template_name="badtoml", user_request="x", max_attempts=3
+        ),
+    )
+    assert slept == [1.0, 2.0], "LLM_FAILED must back off, doubling per attempt"
+
+
+@pytest.mark.finding_a9
 def test_build_context_appends_the_prior_failure() -> None:
     """`build_context` is where the failure text joins the prompt."""
     from templateer.generator import build_context
