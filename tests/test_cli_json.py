@@ -149,6 +149,45 @@ def test_check_json_is_the_audit_report(
     assert payload["findings"] == []
     assert payload["fixtures_seen"] >= 1
     assert payload["fields_probed"] > 0
+    assert payload["fields_skipped"] == []
+
+
+@pytest.mark.finding_a3
+def test_check_reports_schema_fields_that_constraints_skip(
+    runner: CliRunner, make_template: Callable[..., Path]
+) -> None:
+    """Both CLI forms expose incomplete schema-field coverage."""
+    template_dir = make_template(
+        "skipfield",
+        output={"path": "out.toml", "language": "toml"},
+        schema_source=(
+            "from typing import Literal\n"
+            "from pydantic import BaseModel\n\n\n"
+            "class M(BaseModel):\n"
+            "    x: str\n"
+            "    constrained: Literal['SAFE'] | None = None\n"
+        ),
+        template_source=(
+            'x = "{{ x }}"\n'
+            "{% if constrained is not none %}"
+            'constrained = "{{ constrained }}"\n'
+            "{% endif %}"
+        ),
+        fixtures={"minimal.input.json": {"x": "present"}},
+    )
+
+    structured = runner.invoke(
+        main, ["check", "skipfield", "--json", *_paths(template_dir)]
+    )
+    payload = _json_object(structured)
+    assert structured.exit_code == 0
+    assert payload["fields_probed"] == 1
+    assert payload["fields_skipped"][0]["field"] == "constrained"
+
+    prose = runner.invoke(main, ["check", "skipfield", *_paths(template_dir)])
+    assert prose.exit_code == 0
+    assert "1 field(s) skipped" in prose.output
+    assert "constrained" in prose.output
 
 
 @pytest.mark.finding_a7

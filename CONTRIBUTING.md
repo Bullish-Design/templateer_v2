@@ -203,8 +203,12 @@ templateer validate my-template \
 pytest templates/my-template/tests/ -q
 ```
 
-`templateer check` reports source-lint findings, fixture coverage, and injection
-findings. It returns a nonzero exit code when it audits no fixtures.
+`templateer check` reports source-lint findings, fixture coverage, schema-field
+coverage, skipped fields, and injection findings. The audit discovers string
+fields from the Pydantic schema. It can construct omitted optional, nullable,
+nested, and collection values. Pydantic validates every constructed model.
+The audit records constraints that reject every probe value. It returns a
+nonzero exit code when it audits no field.
 
 ## Code style
 

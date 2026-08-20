@@ -71,6 +71,15 @@ mutate src/templateer/audit.py \
                        fixtures_seen=1, fields_probed=1, sites_linted=1,
                        findings=[])  # MUTANT'
 
+# --- schema-driven field discovery, the round-2 follow-up (A3) ------------
+# Restore the old fixture-shaped boundary: omitted nullable/nested fields and
+# empty collection elements disappear before the synthesizer can probe them.
+mutate src/templateer/audit.py \
+  '    """Discover concrete string-bearing paths from the Pydantic JSON Schema.' \
+  'schema field discovery -> fixture-shaped' \
+  '    if data is _MISSING or data is None or data == []:
+        return []  # MUTANT'
+
 # --- the authoring lint, new in this round (A1 lint half) ------------------
 mutate src/templateer/audit.py \
   '    language = template.metadata.output.language

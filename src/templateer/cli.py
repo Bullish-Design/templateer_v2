@@ -747,6 +747,12 @@ def check_template(template_name: str, paths: tuple[str, ...], as_json: bool) ->
         prose.extend(f"  - {finding}" for finding in report.findings)
     if not report.audited:
         prose.append(f"⚠ nothing audited: {report.skipped_reason}")
+    if report.fields_skipped:
+        prose.append(f"⚠ {len(report.fields_skipped)} field(s) skipped:")
+        prose.extend(
+            f"  - {item.fixture}:{item.field}: {item.reason}"
+            for item in report.fields_skipped
+        )
 
     if report.findings:
         _finish(payload, as_json, prose, EXIT_FINDING)
@@ -761,6 +767,8 @@ def check_template(template_name: str, paths: tuple[str, ...], as_json: bool) ->
             f"{report.fixtures_seen} fixture(s), "
             f"{report.sites_linted} site(s) linted, 0 findings"
         )
+        for line in prose:
+            click.echo(line)
 
 
 # ---------------------------------------------------------------------------

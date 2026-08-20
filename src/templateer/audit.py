@@ -23,17 +23,24 @@ import copy
 import json
 import re
 import tomllib
-from collections.abc import Iterator
 from typing import Any
 
 import yaml
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from templateer.template import Template
 
 # ---------------------------------------------------------------------------
 # The report
 # ---------------------------------------------------------------------------
+
+
+class AuditFieldSkip(BaseModel):
+    """One schema string field that the audit could not probe."""
+
+    fixture: str
+    field: str
+    reason: str
 
 
 class AuditReport(BaseModel):
@@ -48,6 +55,7 @@ class AuditReport(BaseModel):
     language: str
     fixtures_seen: int
     fields_probed: int
+    fields_skipped: list[AuditFieldSkip] = Field(default_factory=list)
     sites_linted: int
     findings: list[str]
     skipped_reason: str | None = None
@@ -158,24 +166,250 @@ def _skeleton(artifact: str, language: str) -> Any:
     return _blank_strings(_DATA_PARSERS[language](artifact))
 
 
-def _string_paths(node: Any, prefix: tuple = ()) -> Iterator[tuple]:
-    if isinstance(node, str):
-        yield prefix
-    elif isinstance(node, dict):
-        for k, v in node.items():
-            yield from _string_paths(v, prefix + (k,))
-    elif isinstance(node, list):
-        for i, v in enumerate(node):
-            yield from _string_paths(v, prefix + (i,))
+FieldPath = tuple[str | int, ...]
+FieldTarget = tuple[FieldPath, dict[str, Any]]
+
+# The audit probes at most this many schema fields per fixture. The report
+# records every field above the limit in ``fields_skipped``. This keeps a
+# machine-generated schema from multiplying fields by every language payload
+# without hiding the lost coverage.
+MAX_FIELDS_PER_FIXTURE = 100
+
+_MISSING = object()
 
 
-def _poke(data: Any, path: tuple, value: Any) -> Any:
-    out = copy.deepcopy(data)
-    node = out
-    for key in path[:-1]:
-        node = node[key]
-    node[path[-1]] = value
+def _path_label(path: FieldPath) -> str:
+    """Return a stable dotted path with collection indexes in brackets."""
+    out = ""
+    for part in path:
+        if isinstance(part, int):
+            out += f"[{part}]"
+        else:
+            out += ("." if out else "") + part
     return out
+
+
+def _schema_is_string(schema: dict[str, Any]) -> bool:
+    """Whether one concrete JSON Schema branch carries a string."""
+    if schema.get("type") == "string" or isinstance(schema.get("const"), str):
+        return True
+    enum = schema.get("enum")
+    return isinstance(enum, list) and any(isinstance(item, str) for item in enum)
+
+
+def _discover_string_targets(
+    schema: Any,
+    data: Any,
+    root: dict[str, Any],
+    path: FieldPath = (),
+    depth: int = 0,
+) -> list[FieldTarget]:
+    """Discover concrete string-bearing paths from the Pydantic JSON Schema.
+
+    Existing collection elements keep their indexes. An empty or omitted
+    collection gets index zero, which the synthesizer can construct. Optional
+    and nullable object branches are traversed even when the example omits
+    them.
+    """
+    if depth > _MAX_SCHEMA_DEPTH:
+        return []
+
+    targets: dict[str, FieldTarget] = {}
+    for candidate in _candidates(schema, root, depth):
+        if _schema_is_string(candidate):
+            targets[_path_label(path)] = (path, candidate)
+            continue
+
+        properties = candidate.get("properties")
+        if isinstance(properties, dict):
+            current = data if isinstance(data, dict) else {}
+            for name in sorted(properties):
+                child = current.get(name, _MISSING)
+                for target in _discover_string_targets(
+                    properties[name], child, root, path + (name,), depth + 1
+                ):
+                    targets[_path_label(target[0])] = target
+            continue
+
+        items = candidate.get("items")
+        if isinstance(items, dict):
+            values = data if isinstance(data, list) and data else [_MISSING]
+            for index, value in enumerate(values):
+                for target in _discover_string_targets(
+                    items, value, root, path + (index,), depth + 1
+                ):
+                    targets[_path_label(target[0])] = target
+
+    return [targets[name] for name in sorted(targets)]
+
+
+def _schema_values(schema: dict[str, Any]) -> list[Any]:
+    """Return deterministic candidate values for one concrete schema."""
+    values: list[Any] = []
+    default = schema.get("default", _MISSING)
+    if default is not _MISSING and default is not None:
+        values.append(copy.deepcopy(default))
+    const = schema.get("const", _MISSING)
+    if const is not _MISSING and const is not None:
+        values.append(copy.deepcopy(const))
+    enum = schema.get("enum")
+    if isinstance(enum, list):
+        values.extend(copy.deepcopy(item) for item in enum if item is not None)
+    return values
+
+
+def _synthesise_value(
+    schema: Any, root: dict[str, Any], depth: int = 0
+) -> Any:
+    """Construct one conservative value for a JSON Schema branch.
+
+    The caller still validates the full object with Pydantic. This function
+    never bypasses model validators or field constraints.
+    """
+    if depth > _MAX_SCHEMA_DEPTH:
+        return _MISSING
+    for candidate in _candidates(schema, root, depth):
+        schema_values = _schema_values(candidate)
+        if schema_values:
+            return schema_values[0]
+
+        kind = candidate.get("type")
+        if kind == "string":
+            return "templateer-audit"
+        if kind == "boolean":
+            return False
+        if kind == "integer":
+            minimum = candidate.get("minimum", 0)
+            return int(minimum) if isinstance(minimum, int | float) else 0
+        if kind == "number":
+            minimum = candidate.get("minimum", 0.0)
+            return float(minimum) if isinstance(minimum, int | float) else 0.0
+        if kind == "array":
+            items = candidate.get("items")
+            if not isinstance(items, dict):
+                continue
+            count = candidate.get("minItems", 0)
+            count = count if isinstance(count, int) and count > 0 else 0
+            item = _synthesise_value(items, root, depth + 1)
+            if item is _MISSING and count:
+                continue
+            return [copy.deepcopy(item) for _ in range(count)]
+        if kind == "object" or isinstance(candidate.get("properties"), dict):
+            properties = candidate.get("properties")
+            required = candidate.get("required", [])
+            if not isinstance(properties, dict) or not isinstance(required, list):
+                continue
+            out: dict[str, Any] = {}
+            possible = True
+            for name in sorted(str(item) for item in required):
+                if name not in properties:
+                    possible = False
+                    break
+                value = _synthesise_value(properties[name], root, depth + 1)
+                if value is _MISSING:
+                    possible = False
+                    break
+                out[name] = value
+            if possible:
+                return out
+    return _MISSING
+
+
+def _materialise_target(
+    schema: Any,
+    data: Any,
+    path: FieldPath,
+    value: str,
+    root: dict[str, Any],
+    depth: int = 0,
+) -> Any:
+    """Return data with *path* present and set to *value*.
+
+    Missing parents and collection elements are built from the schema. The
+    result is only a candidate. Pydantic validation decides whether it is a
+    possible model.
+    """
+    if depth > _MAX_SCHEMA_DEPTH:
+        return _MISSING
+    if not path:
+        return value
+
+    head, *rest = path
+    for candidate in _candidates(schema, root, depth):
+        if isinstance(head, str):
+            properties = candidate.get("properties")
+            if not isinstance(properties, dict) or head not in properties:
+                continue
+            out = copy.deepcopy(data) if isinstance(data, dict) else {}
+            required = candidate.get("required", [])
+            if isinstance(required, list):
+                possible = True
+                for name in sorted(str(item) for item in required):
+                    if name in out:
+                        continue
+                    if name not in properties:
+                        possible = False
+                        break
+                    sibling = _synthesise_value(
+                        properties[name], root, depth + 1
+                    )
+                    if sibling is _MISSING:
+                        possible = False
+                        break
+                    out[name] = sibling
+                if not possible:
+                    continue
+            current = out.get(head, _MISSING)
+            child = _materialise_target(
+                properties[head], current, tuple(rest), value, root, depth + 1
+            )
+            if child is _MISSING:
+                continue
+            out[head] = child
+            return out
+
+        items = candidate.get("items")
+        if not isinstance(head, int) or not isinstance(items, dict):
+            continue
+        out = copy.deepcopy(data) if isinstance(data, list) else []
+        while len(out) <= head:
+            item = _synthesise_value(items, root, depth + 1)
+            if item is _MISSING:
+                break
+            out.append(item)
+        if len(out) <= head:
+            continue
+        child = _materialise_target(
+            items, out[head], tuple(rest), value, root, depth + 1
+        )
+        if child is _MISSING:
+            continue
+        out[head] = child
+        return out
+    return _MISSING
+
+
+def _safe_seeds(schema: dict[str, Any], current: Any) -> list[str]:
+    """Return deterministic benign strings for a target baseline."""
+    seeds: list[str] = []
+    if isinstance(current, str):
+        seeds.append(current)
+    seeds.extend(item for item in _schema_values(schema) if isinstance(item, str))
+    seeds.extend(("templateer-audit", "safe", "a", "0"))
+    return list(dict.fromkeys(seeds))
+
+
+def _value_at_path(data: Any, path: FieldPath) -> Any:
+    """Return the current value at *path*, or the missing sentinel."""
+    node = data
+    for part in path:
+        if isinstance(part, str) and isinstance(node, dict) and part in node:
+            node = node[part]
+        elif isinstance(part, int) and isinstance(node, list) and part < len(node):
+            node = node[part]
+        else:
+            return _MISSING
+    return node
 
 
 # ---------------------------------------------------------------------------
@@ -392,6 +626,8 @@ def audit_template(template: Template) -> AuditReport:
     language = template.metadata.output.language
     findings, sites_linted = _lint_source(template)
 
+    skipped: list[AuditFieldSkip] = []
+
     def report(
         fixtures: int, probed: int, reason: str | None = None
     ) -> AuditReport:
@@ -400,6 +636,9 @@ def audit_template(template: Template) -> AuditReport:
             language=language,
             fixtures_seen=fixtures,
             fields_probed=probed,
+            fields_skipped=sorted(
+                skipped, key=lambda item: (item.fixture, item.field, item.reason)
+            ),
             sites_linted=sites_linted,
             findings=findings,
             skipped_reason=reason,
@@ -416,11 +655,13 @@ def audit_template(template: Template) -> AuditReport:
 
     try:
         schema_class = template.get_schema_class()
+        schema = schema_class.model_json_schema()
     except Exception as e:
         return report(0, 0, f"schema class unloadable: {e}")
 
     payloads = PAYLOADS[language]
     probed = 0
+    targets_seen = 0
 
     for fixture in fixtures:
         try:
@@ -429,26 +670,80 @@ def audit_template(template: Template) -> AuditReport:
             findings.append(f"{fixture.name}: fixture is not readable JSON: {e}")
             continue
         try:
-            baseline = _skeleton(
-                template.render(schema_class.model_validate(benign_data)), language
-            )
+            benign_model = schema_class.model_validate(benign_data)
         except Exception as e:
             findings.append(
-                f"{fixture.name}: benign fixture does not render/parse: {e}"
+                f"{fixture.name}: fixture is not valid for the schema: {e}"
             )
             continue
 
-        for path in _string_paths(benign_data):
-            where = ".".join(str(p) for p in path)
-            counted = False
-            for payload in payloads:
+        model_data = benign_model.model_dump(mode="json")
+        targets = _discover_string_targets(schema, model_data, schema)
+        targets_seen += len(targets)
+        for index, (path, target_schema) in enumerate(targets):
+            where = _path_label(path)
+            if index >= MAX_FIELDS_PER_FIXTURE:
+                skipped.append(
+                    AuditFieldSkip(
+                        fixture=fixture.name,
+                        field=where,
+                        reason=(
+                            f"field limit {MAX_FIELDS_PER_FIXTURE} reached for "
+                            "this fixture"
+                        ),
+                    )
+                )
+                continue
+
+            baseline: Any = _MISSING
+            baseline_errors: list[str] = []
+            schema_valid_baseline = False
+            current = _value_at_path(model_data, path)
+            for seed in _safe_seeds(target_schema, current):
+                candidate = _materialise_target(
+                    schema, model_data, path, seed, schema
+                )
+                if candidate is _MISSING:
+                    baseline_errors.append("schema branch could not be constructed")
+                    continue
                 try:
-                    model = schema_class.model_validate(_poke(benign_data, path, payload))
+                    model = schema_class.model_validate(candidate)
+                    schema_valid_baseline = True
+                    baseline = _skeleton(template.render(model), language)
+                except Exception as e:
+                    baseline_errors.append(f"{type(e).__name__}: {e}")
+                    continue
+                break
+            if baseline is _MISSING:
+                detail = baseline_errors[-1] if baseline_errors else "no candidate value"
+                if schema_valid_baseline:
+                    findings.append(
+                        f"{fixture.name}:{where}: synthesised field value does "
+                        f"not render/parse: {detail}"
+                    )
+                skipped.append(
+                    AuditFieldSkip(
+                        fixture=fixture.name,
+                        field=where,
+                        reason=f"could not synthesise a valid field value: {detail}",
+                    )
+                )
+                continue
+
+            field_probed = False
+            for payload in payloads:
+                candidate = _materialise_target(
+                    schema, model_data, path, payload, schema
+                )
+                if candidate is _MISSING:
+                    continue
+                try:
+                    model = schema_class.model_validate(candidate)
                 except Exception:
-                    continue  # constrained field — not injectable by construction
-                if not counted:
+                    continue
+                if not field_probed:
                     probed += 1
-                    counted = True
+                    field_probed = True
                 try:
                     rendered = template.render(model)
                 except Exception as e:
@@ -471,4 +766,21 @@ def audit_template(template: Template) -> AuditReport:
                     )
                     break
 
+            if not field_probed:
+                skipped.append(
+                    AuditFieldSkip(
+                        fixture=fixture.name,
+                        field=where,
+                        reason="all language audit payloads violate schema constraints",
+                    )
+                )
+
+    if targets_seen == 0:
+        return report(len(fixtures), 0, "schema has no string-bearing fields")
+    if probed == 0:
+        return report(
+            len(fixtures),
+            0,
+            "schema string fields could not be probed; inspect fields_skipped",
+        )
     return report(len(fixtures), probed)

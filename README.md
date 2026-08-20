@@ -187,7 +187,7 @@ errors, warnings = registry.validate_artifact(
 )
 
 report = registry.audit("my-template")
-print(report.audited, report.findings, report.skipped_reason)
+print(report.audited, report.findings, report.fields_skipped)
 ```
 
 Pass `model_data` to `validate_artifact` to enable the round-trip type check.
@@ -341,13 +341,19 @@ templateer check my-template
 ```
 
 `validate` checks the model, renderer, output validators, and model-to-artifact
-type round trip. `check` lints interpolation sites and probes fixture string
-fields with language-specific injection values.
+type round trip. `check` starts from each valid fixture. It discovers string
+fields from the Pydantic schema. It also probes omitted optional fields,
+nullable fields, nested fields, and collection elements when it can construct
+a valid model.
 
 The audit report includes `fixtures_seen`, `fields_probed`, `sites_linted`,
-`findings`, and `skipped_reason`. A template without example fixtures produces
-an unaudited report. `check` exits 2 when no lint finding exists. It exits 1
-when the source lint reports a finding.
+`fields_skipped`, `findings`, and `skipped_reason`. Each skipped-field record
+names the fixture, field, and reason. The audit validates every synthesized
+model through Pydantic. It probes at most 100 schema fields per fixture. It
+records fields above that bound as skipped. A template without example
+fixtures produces an unaudited report. A schema without string fields also
+produces an unaudited report. `check` exits 2 when it audits no field. It exits
+1 when the source lint or injection audit reports a finding.
 
 ### Region outputs
 

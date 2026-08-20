@@ -354,3 +354,168 @@ def test_audit_report_is_json_serialisable(repo_templates: Path) -> None:
     payload = json.loads(json.dumps(report.model_dump()))
     assert payload["template"] == "pyproject-uv"
     assert payload["findings"] == []
+
+
+# ---------------------------------------------------------------------------
+# Round-2 follow-up §A3 — schema-driven field synthesis
+# ---------------------------------------------------------------------------
+
+
+SCHEMA_SYNTHESIS = """\
+from typing import Literal
+
+from pydantic import BaseModel
+
+
+class Details(BaseModel):
+    note: str
+
+
+class M(BaseModel):
+    required: str
+    optional_text: str = "safe"
+    nullable_text: str | None = None
+    details: Details | None = None
+    tags: list[str] = []
+    constrained: Literal["SAFE"] | None = None
+"""
+
+
+SYNTHESIS_TEMPLATE = """\
+required: {{ required }}
+optional_text: {{ optional_text }}
+{% if nullable_text is not none %}
+nullable_text: {{ nullable_text }}
+{% endif %}
+{% if details is not none %}
+details:
+  note: {{ details.note }}
+{% endif %}
+tags:
+{% for tag in tags %}
+  - {{ tag }}
+{% endfor %}
+{% if constrained is not none %}
+constrained: {{ constrained }}
+{% endif %}
+"""
+
+
+@pytest.mark.finding_a3
+def test_audit_synthesises_omitted_schema_fields(
+    make_template: Callable[..., Path],
+) -> None:
+    """Optional, nullable, nested, and collection fields get real probes."""
+    template_dir = make_template(
+        "schemafields",
+        output={"path": "out.yaml", "language": "yaml"},
+        schema_source=SCHEMA_SYNTHESIS,
+        template_source=SYNTHESIS_TEMPLATE,
+        fixtures={"minimal.input.json": {"required": "present"}},
+    )
+
+    report = audit_template(Template(template_dir))
+
+    assert report.fixtures_seen == 1
+    assert report.fields_probed == 5
+    assert [skip.field for skip in report.fields_skipped] == ["constrained"]
+    assert "schema constraints" in report.fields_skipped[0].reason
+
+    injection_findings = [
+        finding for finding in report.findings if "minimal.input.json:" in finding
+    ]
+    for field in (
+        "details.note",
+        "nullable_text",
+        "optional_text",
+        "required",
+        "tags[0]",
+    ):
+        assert any(f":{field}:" in finding for finding in injection_findings), (
+            field,
+            injection_findings,
+        )
+
+
+@pytest.mark.finding_a3
+def test_audit_probe_order_is_stable(
+    make_template: Callable[..., Path],
+) -> None:
+    """Schema fields use lexical paths, independent of declaration order."""
+    template_dir = make_template(
+        "probeorder",
+        output={"path": "out.yaml", "language": "yaml"},
+        schema_source=(
+            "from pydantic import BaseModel\n\n\n"
+            "class M(BaseModel):\n"
+            "    zed: str\n"
+            "    alpha: str = 'safe'\n"
+            "    middle: list[str] = []\n"
+        ),
+        template_source=(
+            "zed: {{ zed }}\n"
+            "alpha: {{ alpha }}\n"
+            "middle:\n{% for item in middle %}\n  - {{ item }}\n{% endfor %}\n"
+        ),
+        fixtures={"minimal.input.json": {"zed": "present"}},
+    )
+
+    report = audit_template(Template(template_dir))
+    paths = [
+        finding.split(":", 2)[1]
+        for finding in report.findings
+        if finding.startswith("minimal.input.json:")
+    ]
+    assert paths == ["alpha", "middle[0]", "zed"]
+    assert report.fields_probed == 3
+    assert report.fields_skipped == []
+
+
+@pytest.mark.finding_a3
+def test_audit_reports_schema_with_no_probeable_strings(
+    make_template: Callable[..., Path],
+) -> None:
+    """A valid fixture does not make a string-free schema look audited."""
+    template_dir = make_template(
+        "nostrings",
+        output={"path": "out.yaml", "language": "yaml"},
+        schema_source=(
+            "from pydantic import BaseModel\n\n\n"
+            "class M(BaseModel):\n"
+            "    count: int\n"
+            "    enabled: bool = True\n"
+        ),
+        template_source="count: {{ count }}\nenabled: {{ enabled }}\n",
+        fixtures={"minimal.input.json": {"count": 2}},
+    )
+
+    report = audit_template(Template(template_dir))
+    assert report.fixtures_seen == 1
+    assert report.fields_probed == 0
+    assert report.fields_skipped == []
+    assert report.audited is False
+    assert report.skipped_reason == "schema has no string-bearing fields"
+
+
+@pytest.mark.finding_a3
+def test_audit_skip_details_are_json_serialisable(
+    make_template: Callable[..., Path],
+) -> None:
+    """The Python and command-line JSON contracts share structured reasons."""
+    template_dir = make_template(
+        "skipjson",
+        output={"path": "out.yaml", "language": "yaml"},
+        schema_source=SCHEMA_SYNTHESIS,
+        template_source=SYNTHESIS_TEMPLATE,
+        fixtures={"minimal.input.json": {"required": "present"}},
+    )
+
+    payload = audit_template(Template(template_dir)).model_dump()
+    assert payload["fields_probed"] == 5
+    assert payload["fields_skipped"] == [
+        {
+            "fixture": "minimal.input.json",
+            "field": "constrained",
+            "reason": payload["fields_skipped"][0]["reason"],
+        }
+    ]

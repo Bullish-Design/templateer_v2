@@ -424,3 +424,17 @@ class TestIntegration:
         r = TemplateRegistry.from_paths([empty])
         assert len(r) == 0
         assert r.list_templates() == []
+
+    @pytest.mark.finding_a3
+    def test_registry_audit_exposes_schema_field_coverage(
+        self, registry: TemplateRegistry
+    ) -> None:
+        """The public Python API returns schema-driven coverage details."""
+        report = registry.audit("pyproject-uv")
+
+        assert report.audited is True
+        assert report.fixtures_seen >= 1
+        assert report.fields_probed > 0
+        assert [(item.field, item.reason) for item in report.fields_skipped] == [
+            ("project_type", "all language audit payloads violate schema constraints")
+        ]
