@@ -59,10 +59,12 @@ def _attempt(
         return fail(FailureReason.NO_TEMPLATE, str(e))
 
     output_path = template.metadata.output.path
-    region = template.metadata.output.region
+    # ``region`` exists on RegionOutput only, so bind it before the test:
+    # a full_file output has no such attribute.
+    region = getattr(template.metadata.output, "region", None)
     # A region template's failures are grounded in the page it lives on;
     # ``path`` is informational for regions, ``region.page`` is the anchor.
-    if template.metadata.output.kind == "region" and region is not None:
+    if region is not None:
         output_path = region.page
 
     # 2 — Generate the model ----------------------------------------------

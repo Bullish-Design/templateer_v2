@@ -187,12 +187,15 @@ def describe_template(template_name: str, paths: tuple[str, ...]) -> None:
     click.echo(f"Output language: {template.output_language}")
     click.echo(f"Trigger paths: {template.trigger_paths}")
     output = template.metadata.output
-    click.echo(f"  Generates: {output.path} ({output.language})")
-    if output.kind == "region" and output.region is not None:
-        anchor = output.region.anchor or "-"
+    # ``region`` exists on RegionOutput only, so bind it before the test.
+    region = getattr(output, "region", None)
+    target = output.path or (region.page if region is not None else "-")
+    click.echo(f"  Generates: {target} ({output.language})")
+    if region is not None:
+        anchor = region.anchor or "-"
         click.echo(
-            f"  Region: page={output.region.page} "
-            f"ref={output.region.ref} anchor={anchor}"
+            f"  Region: page={region.page} "
+            f"ref={region.ref} anchor={anchor}"
         )
 
 

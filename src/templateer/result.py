@@ -6,11 +6,12 @@ actually needs is a result, and a request it can be retried from.
 """
 
 from enum import Enum
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
 from templateer.generator import DEFAULT_MODEL
+from templateer.models import RegionBoundary
 
 
 class FailureReason(str, Enum):
@@ -52,7 +53,10 @@ class GenerationRequest(BaseModel):
     user_request: str = Field(description="What the caller wants generated")
     context: dict[str, Any] = Field(default_factory=dict, description="Project facts")
     model_name: str = Field(default=DEFAULT_MODEL)
-    max_attempts: int = Field(default=3, ge=1, description="Whole-pipeline attempts")
+    # An uncapped budget burns tokens to reach the same answer.
+    max_attempts: int = Field(
+        default=3, ge=1, le=10, description="Whole-pipeline attempts"
+    )
 
 
 class GenerationResult(BaseModel):
@@ -71,6 +75,18 @@ class GenerationResult(BaseModel):
     error_detail: str | None = Field(default=None, description="Human-readable failure text")
     warnings: list[str] = Field(default_factory=list, description="Non-fatal validator notes")
     attempt: int = Field(default=1, ge=1, description="Which attempt produced this result")
+
+    # A region generation produces a payload, not a file.  The consumer needs
+    # the slot to splice the payload into.
+    kind: Literal["full_file", "region"] = Field(
+        default="full_file", description="What the template generates"
+    )
+    region: RegionBoundary | None = Field(
+        default=None, description="The bounded slot — region generations only"
+    )
+    usage: dict[str, int] | None = Field(
+        default=None, description="Token counts; None when the provider reports none"
+    )
 
     @model_validator(mode="after")
     def _check_invariants(self) -> "GenerationResult":
