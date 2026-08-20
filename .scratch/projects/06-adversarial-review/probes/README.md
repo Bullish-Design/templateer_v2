@@ -1,59 +1,64 @@
-# Reproduction probes
+# Adversarial review probes
 
-Every finding in `../TEMPLATEER-V2_ADVERSARIAL_REVIEW_2.md` marked **[verified]**
-reproduces here. Run each from the repo root with the checked-in `.venv`.
+These probes preserve the evidence for the round-2 adversarial review. The
+baseline column records results from `0.2.0` at `f3b9193` on 2026-08-20. The
+remediated column records the current results after the review fixes.
+
+Run each probe from the repository root inside the devenv shell:
 
 ```bash
-.venv/bin/python .scratch/projects/06-adversarial-review/probes/p_escaping_holes.py
-bash          .scratch/projects/06-adversarial-review/probes/p_audit_blind.sh
+devenv shell -- bash -lc \
+  '.venv/bin/python .scratch/projects/06-adversarial-review/probes/p_escaping_holes.py'
+devenv shell -- bash -lc \
+  'bash .scratch/projects/06-adversarial-review/probes/p_audit_blind.sh'
 ```
 
-Probes write only to `mktemp -d` directories and leave the repo unchanged.
-`mutate.sh` edits `src/` in place and restores from a `.bak` — check
-`git status` after it runs.
+The probes use temporary directories and leave the repository unchanged.
+`mutate.sh` changes `src/` in place and restores each file from a backup.
+Check `git status` after it runs.
 
-| Probe | Findings | Headline result |
-|---|---|---|
-| `p_escaping_holes.py` | A1, B4 | `str` → `bool`/`int`/`null`; containers bypass the finalizer |
-| `p_audit_blind.sh` | A1, A3 | corrupted artifact; render, validate and `check` all pass |
-| `p_audit_vacuous.sh` | A2, A3 | `✓ escaping audit passed` after auditing nothing (twice) |
-| `mutate.sh` | A3 | `audit_template → return []` leaves 257/257 green |
-| `escape_chars.py` | B1 | 34 codepoints break YAML or Python |
-| `escape_fix.py` | B1 | candidate fix: 36 broken pairs → 2 |
-| `fuzz_escape.py` | B1 | 16,000 random cases; 1,236 failures, all YAML/Python |
-| `p_pipeline_escape.py` | A4, B2 | exception escapes `generate()`; schema module escapes the root |
-| `p_region.py` | A5, A6, B3, B5 | region check is opt-out; result lacks `ref`; `{}` passes |
-| `p_surface.py` | A8, A9, B6, B8, C2 | 3 identical retries; async blocked; empty top-level exports |
+## Before and after
 
-## Expected output (2026-08-20, 0.2.0 @ f3b9193)
+| Probe | Findings | Baseline at `f3b9193` | Remediated result |
+|---|---|---|---|
+| `p_escaping_holes.py` | A1, B4 | Strings re-lex as other scalar types. Containers render as Python repr. | The scalar reproduction remains visible. Container interpolation raises `EscapeError`. |
+| `p_audit_blind.sh` | A1, A3 | `check` exits 0. Render and validation accept type changes. | `check` exits 1 with four findings. Render exits 1. Validation with model data reports both type changes. |
+| `p_audit_vacuous.sh` | A2, A3 | Both cases report a passing audit after zero probes. | No fixtures reports “nothing audited” and exits 1. `language: nix` fails to load and exits 3. |
+| `mutate.sh` | A1, A3, A5, B1, B4 | The audit mutant leaves 257 tests green. | All seven safety-control mutants turn the 435-test suite red. |
+| `escape_chars.py` | B1 | 34 codepoints break YAML or Python. | 0 codepoints break. Two lone surrogates raise `EscapeError`. |
+| `escape_fix.py` | B1 | Current code has 36 broken pairs. The candidate has two TOML failures. | Current and selected candidate have 0 broken pairs. Both reject two lone surrogates. |
+| `fuzz_escape.py` | B1 | 1,236 of 16,000 language cases fail. | 0 language cases fail. The escaper rejects 437 inputs that contain lone surrogates. |
+| `p_pipeline_escape.py` | A4, B2 | A schema escapes the root. `generate()` raises `TemplateLoadError`. | Schema loading rejects the escape. `generate()` returns `FailureReason.NO_TEMPLATE`. |
+| `p_region.py` | A5, A6, B3, B5 | The optional check wins. Empty payloads pass. The result lacks splice metadata. | The required check wins. Fences and empty payloads fail. Markdown fails model validation. Results carry `kind` and `region`. |
+| `p_surface.py` | A8, A9, B6, B8, C2 | Three prompts are identical. Async use fails. Warnings and exports are absent. | Repair prompts differ. Async use returns a result. Warnings survive. Validation errors agree. Exports are populated. |
 
+## Mutation gate
+
+The current mutation run produces this table:
+
+```text
+(unmutated)                                    435 passed, 9 skipped
+audit_template -> clean report                 25 failed, 410 passed, 9 skipped
+lint_template_source -> no findings             5 failed, 430 passed, 9 skipped
+check_round_trip -> no findings                 7 failed, 428 passed, 9 skipped
+effective_validators -> declared only           5 failed, 430 passed, 9 skipped
+validate_region_payload -> no errors            16 failed, 419 passed, 9 skipped
+escape_string -> bare json.dumps                 9 failed, 426 passed, 9 skipped
+finalizer -> containers pass through            24 failed, 411 passed, 9 skipped
+(unmutated, restored)                          435 passed, 9 skipped
 ```
-mutate.sh
-  (unmutated)                            257 passed, 9 skipped
-  audit_template -> return []            257 passed, 9 skipped   <-- no negative coverage
-  validate_region_payload -> return []     7 failed, 250 passed  <-- covered
 
-escape_chars.py
-  codepoints that break at least one target language: 34
+Each mutant remains valid Python. A syntax error does not count as negative
+coverage.
 
-escape_fix.py
-  current    broken codepoint/language pairs: 36   ['python', 'yaml']
-  candidate  broken codepoint/language pairs: 2    ['toml']       <-- lone surrogates; raise EscapeError
+## Review corrections
 
-p_audit_blind.sh
-  templateer check   -> ✓ escaping audit passed  exit=0
-  validate_artifact  -> []
-  yaml.safe_load     -> {'title': True, 'owner': None}            <-- schema said str, str
+The review said that one payload left vulnerable YAML and JSON templates
+clean. The baseline probe showed that JSON and Python were already detected.
+Only YAML stayed clean.
 
-p_pipeline_escape.py
-  !!! EXCEPTION ESCAPED generate(): TemplateLoadError
-
-p_region.py
-  succeeded : True
-  artifact  : '```\njust a sentence, not a mapping'                <-- corrupts the hosting page
-
-p_surface.py
-  attempts made        : 3
-  all inputs identical : True
-  RuntimeError: This event loop is already running
-```
+The original character sweep found 34 broken codepoints. A wider sweep found
+two more: U+FFFE and U+FFFF. The remediated fuzz probe then found a separate
+interaction. PyYAML folds spaces adjacent to raw U+2028 or U+2029 separators.
+The escaper now escapes both separators, and a regression test covers that
+interaction.

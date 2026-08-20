@@ -1,234 +1,243 @@
 # Contributing to Templateer
 
-## Development Setup
+## Set up the project
+
+Templateer requires Python 3.12 or later. The `devenv` shell supplies the
+pinned Python and development tools.
 
 ```bash
-# Clone the repository
-git clone <repo-url>
-cd templateer
-
-# Install development dependencies
-uv pip install -e ".[dev]"
-
-# Verify everything works
-uv run pytest
-uv run ty check src/
-uv run ruff check src/ tests/
+devenv shell
+uv sync --locked --extra dev
 ```
 
-Requirements: Python ≥ 3.12, uv.
+Run all later commands inside that shell. You can also run one command from
+outside the shell with `devenv shell -- <command>`.
 
-## Project Structure
+## Project structure
 
-```
+```text
 templateer/
-├── pyproject.toml          # Project metadata and dependencies
-├── README.md               # User-facing documentation
-├── CONTRIBUTING.md         # This file
-├── src/
-│   └── templateer/
-│       ├── __init__.py     # Version, default template paths
-│       ├── py.typed        # PEP 561 marker
-│       ├── api.py          # Python API (TemplateRegistry)
-│       ├── catalog.py      # TemplateCatalog
-│       ├── cli.py          # CLI (Click)
-│       ├── generation.py   # Generation entity + enums
-│       ├── generator.py    # Pydantic AI model generation
-│       ├── models.py       # Pydantic models (metadata, etc.)
-│       ├── pipeline.py     # End-to-end pipeline
-│       ├── renderer.py     # MiniJinja renderer
-│       ├── template.py     # Template loader
-│       ├── validation.py   # Model validation utilities
-│       └── validators.py   # Output validators
-├── tests/
-│   ├── conftest.py
-│   ├── test_api.py
-│   ├── test_catalog.py
-│   ├── test_cli.py
-│   ├── test_generator.py
-│   ├── test_integration.py
-│   ├── test_models.py
-│   ├── test_pipeline.py
-│   ├── test_renderer.py
-│   ├── test_template.py
-│   └── test_validators.py
-└── templates/
-    └── pyproject-uv/
-        ├── metadata.yml
-        ├── schema.py
-        ├── prompt.md
-        ├── template.j2
-        ├── examples/
-        │   ├── fastapi.input.json
-        │   └── fastapi.output.toml
-        └── tests/
-            └── test_pyproject_uv_template.py
+├── pyproject.toml              # Package metadata, dependencies, and tool settings
+├── README.md                   # User documentation
+├── CONTRIBUTING.md             # Contributor and template-author guidance
+├── src/templateer/
+│   ├── __init__.py             # Public exports and installed package version
+│   ├── api.py                  # TemplateRegistry Python API
+│   ├── audit.py                # Authoring lint and injection audit
+│   ├── catalog.py              # Template discovery, lookup, and load errors
+│   ├── cli.py                  # Click command-line interface
+│   ├── escaping.py             # Language-aware interpolation escaping
+│   ├── generator.py            # Pydantic AI generation and prompt context
+│   ├── models.py               # Template metadata and validator models
+│   ├── pipeline.py             # Generation, rendering, validation, and retries
+│   ├── py.typed                # PEP 561 typing marker
+│   ├── renderer.py             # MiniJinja rendering
+│   ├── result.py               # Generation request, result, and failure types
+│   ├── template.py             # Template loading and resource access
+│   └── validators.py           # Artifact, region, and round-trip checks
+├── tests/                      # Library and command-line interface tests
+└── templates/pyproject-uv/     # Development example template
 ```
+
+The wheel does not include the `templates/` directory. Users supply template
+search paths at runtime.
 
 ## Architecture
 
-Templateer follows a pipeline architecture:
+Templateer uses this pipeline:
 
+```text
+Template lookup → Pydantic model generation → MiniJinja rendering → artifact validation
 ```
-Template catalog → Template resolution → LLM model generation → Jinja rendering → Output validation
-```
 
-### Key Concepts
+The language in `metadata.yml` selects the escape grammar and parser. It also
+selects the audit payload set for structured languages.
 
-| Concept | Description |
-|---------|-------------|
-| **Template** | A directory containing everything needed to generate one kind of artifact |
-| **Schema** | A Pydantic model defining the structured data the LLM must produce |
-| **Prompt** | Instructions that help the LLM fill the schema correctly |
-| **Renderer** | Deterministic Jinja rendering from validated model data only |
-| **Context** | Input facts passed to the LLM — never the template |
-| **Catalog** | Collection of all available templates, lookup by exact name |
+The renderer receives validated Pydantic model data. The artifact then passes
+its parse checks, declared validators, and round-trip checks.
 
-### Central Invariant
+## Run the quality gate
 
-> **A renderer may only receive validated Pydantic model data.** No raw LLM output, user prompt, environment variables, or filesystem context reaches the template.
-
-## Running Tests
+Run this gate before you submit a pull request:
 
 ```bash
-# Run all tests
-uv run pytest
-
-# Run specific test files
-uv run pytest tests/test_models.py -v
-
-# Run with coverage
-uv run pytest --cov=templateer --cov-report=term-missing
-
-# Run LLM-dependent tests (requires OPENAI_API_KEY)
-OPENAI_API_KEY=sk-... uv run pytest tests/test_generator.py -v
-
-# Run template-specific tests
-uv run pytest templates/pyproject-uv/tests/ -v
+pytest -q
+ruff check src/ tests/ templates/
+ty check src/
 ```
 
-## Quality Gates
-
-Before submitting a PR, ensure:
+Run a focused test while you work:
 
 ```bash
-# All tests pass
-uv run pytest
-
-# Strict type checking passes
-uv run ty check src/
-
-# Ruff linting passes
-uv run ruff check src/ tests/
-
-# Formatted correctly
-uv run ruff format src/ tests/
-
-# Coverage ≥ 80%
-uv run pytest --cov=templateer --cov-report=term-missing
+pytest tests/test_models.py -q
+pytest templates/pyproject-uv/tests/ -q
 ```
 
-## Adding a New Template
+Run coverage when a change needs a coverage report:
 
-1. Create a directory under `templates/` with your template name (kebab-case):
-   ```
-   templates/my-template/
-   ```
+```bash
+pytest --cov=templateer --cov-report=term-missing
+```
 
-2. Create `metadata.yml`:
-   ```yaml
-   name: my-template
-   description: What this template generates.
+Tests use Pydantic AI test models by default. A real provider run needs its
+provider API key.
 
-   outputs:
-     - path: output.ext
-       kind: full_file
-       language: toml
+## Add a template
 
-   schema:
-     module: schema
-     class: MyModel
+Create a kebab-case directory under a template search path. This repository
+uses `templates/` for development examples.
 
-   prompt:
-     file: prompt.md
+```text
+templates/my-template/
+├── metadata.yml
+├── schema.py
+├── prompt.md
+├── template.j2
+├── examples/
+│   ├── minimal.input.json
+│   └── minimal.output.toml
+└── tests/
+    └── test_my_template.py
+```
 
-   renderer:
-     engine: minijinja
-     file: template.j2
+### 1. Define the metadata
 
-   strict_context: true
+Use the singular `output` mapping. Use `trigger_filenames` for discovery hints.
 
-   triggers:
-     filenames:
-       - output.ext
-   ```
+```yaml
+name: my-template
+description: Generate one TOML configuration file.
 
-3. Create `schema.py` with your Pydantic model.
+output:
+  kind: full_file
+  path: output.toml
+  language: toml
 
-4. Create `prompt.md` with LLM instructions.
+schema:
+  module: schema
+  class: MyModel
 
-5. Create `template.j2` with the Jinja template.
+prompt:
+  file: prompt.md
 
-6. Create `examples/scenario.input.json` and `examples/scenario.output.ext`.
+renderer:
+  engine: minijinja
+  file: template.j2
 
-7. Create `tests/test_my_template.py` with template-specific tests.
+trigger_filenames:
+  - output.toml
+```
 
-8. Verify:
-   ```bash
-   uv run templateer validate my-template --input examples/scenario.input.json
-   uv run pytest templates/my-template/tests/ -v
-   ```
+The `kind` field defaults to `full_file`. Set it explicitly when that improves
+the metadata.
 
-### Template Design Guidelines
+Full-file templates support these languages:
 
-- **Model decisions, not syntax.** The schema constrains what choices the LLM can make.
-- **Use enums/literals** where possible to limit options.
-- **Nested models** for structured concepts.
-- **Validators** (`@model_validator`) for cross-field constraints.
-- **Field descriptions** — the LLM reads them.
-- **Useful defaults** so minimal inputs work.
-- **Strict context** — always enable `strict_context: true`.
+- `toml`
+- `json`
+- `yaml`
+- `python`
+- `markdown`
+- `text`
 
-## Architecture Decision Records
+A region template must use `kind: region` and `language: yaml`. It must also
+define `output.region.page`, `output.region.ref`, and optional
+`output.region.anchor`.
 
-### ADR 1: MiniJinja over Jinja2
+Metadata rejects unknown keys. Do not use the old `outputs`, `strict_context`,
+or `triggers.filenames` fields.
 
-**Decision**: Use MiniJinja for template rendering.
+### 2. Define the schema
 
-**Rationale**: MiniJinja provides the same Jinja syntax but with better sandboxing guarantees. Strict mode causes errors on undefined variables rather than silently producing empty strings, which aligns with Templateer's security model.
+Create a Pydantic model in `schema.py`:
 
-### ADR 2: Pydantic AI over direct API calls
+```python
+from pydantic import BaseModel, Field
 
-**Decision**: Use Pydantic AI for LLM integration instead of raw LLM API calls.
 
-**Rationale**: Pydantic AI provides built-in structured output support with automatic retry on validation failure. This aligns with Templateer's philosophy of constrained generation — the LLM is forced to produce valid structured data.
+class MyModel(BaseModel):
+    name: str = Field(description="The package name")
+    line_length: int = Field(default=100, ge=1)
+```
 
-### ADR 3: Template name must match directory name
+Use literals for closed choices. Use nested models for structured concepts.
+Add field descriptions because the language model reads them.
 
-**Decision**: Enforce that `metadata.yml`'s `name` field matches the directory name.
+### 3. Write the prompt and renderer
 
-**Rationale**: Eliminates confusion about template identity. The directory name is the sole lookup key, and the invariant ensures consistency.
+Write task-specific instructions in `prompt.md`. The prompt must name the
+schema and explain domain constraints.
 
-### ADR 4: Exact name matching only (no fuzzy search)
+Write deterministic MiniJinja syntax in `template.j2`:
 
-**Decision**: TemplateCatalog uses exact string matching for template names.
+```jinja
+name = "{{ name }}"
+line-length = {{ line_length }}
+```
 
-**Rationale**: Predictable, deterministic behavior. Fuzzy matching would introduce ambiguity that is undesirable for agent-driven workflows.
+Quote string interpolations in structured output. Leave numeric and Boolean
+interpolations unquoted when their schema types require it.
 
-## Code Style
+Use a loop to render a list or mapping. Direct container interpolation raises
+`EscapeError`.
 
-- **Docstrings**: All public functions, classes, and methods must have docstrings with Google-style Args/Returns/Raises.
-- **Type hints**: All function signatures must be fully type-hinted.
-- **Error messages**: Error messages should include enough context to identify the problem:
-  - Template name when template lookup fails
-  - File path when a file is missing
-  - Variable name when rendering fails
-- **Ruff**: Configuration is in `pyproject.toml`. Run `uv run ruff format` before committing.
+### 4. Add examples and tests
+
+Add at least one `*.input.json` fixture. Templateer validates an example before
+it uses that example in a generation prompt.
+
+Add the expected artifact beside the input fixture. Add focused tests under
+the template's `tests/` directory.
+
+Test valid input and adversarial string values. Test every custom validator.
+
+### 5. Check the template
+
+Run the authoring audit, deterministic validation, and template tests:
+
+```bash
+templateer check my-template -p ./templates
+templateer validate my-template \
+  -p ./templates \
+  --input templates/my-template/examples/minimal.input.json
+pytest templates/my-template/tests/ -q
+```
+
+`templateer check` reports source-lint findings, fixture coverage, and injection
+findings. It returns a nonzero exit code when it audits no fixtures.
+
+## Code style
+
+- Add type hints to public function signatures.
+- Add docstrings to public modules, classes, functions, and methods.
+- Use active voice and short sentences in documentation and messages.
+- Include the template name, field name, or file path in actionable errors.
+- Run the quality gate before you save a commit.
+
+## Design decisions
+
+### MiniJinja renderer
+
+Templateer uses MiniJinja for deterministic rendering. Its strict undefined
+behavior turns schema and renderer drift into an error.
+
+### Pydantic AI generation
+
+Templateer uses Pydantic AI for structured model generation. The outer pipeline
+also retries repairable artifact failures with the prior error detail.
+
+### Exact template names
+
+The `name` in `metadata.yml` must match the directory name. Catalog lookup uses
+that exact name and does not use fuzzy matching.
 
 ## Versioning
 
-Templateer follows [Semantic Versioning](https://semver.org/). The version is stored in `src/templateer/__init__.py`.
+Templateer follows Semantic Versioning. Change the project version in
+`pyproject.toml`. The public `templateer.__version__` value reads installed
+package metadata.
 
-## Questions?
+## Behavioral specifications
 
-Open an issue or consult the Allium specs at `.scratch/specs/allium/` for the behavioural specification.
+The Allium specifications are in `.scratch/specs/allium/`. Update them when a
+behavior change makes a specification stale.

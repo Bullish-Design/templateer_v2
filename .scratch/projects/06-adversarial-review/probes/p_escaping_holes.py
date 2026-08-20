@@ -1,6 +1,10 @@
-"""SS A1 -- unquoted interpolation re-lexes a `str` as another type.
+"""A1 + B4 -- guard unquoted interpolation and container interpolation.
 
-Run from the repo root:  .venv/bin/python .scratch/projects/06-adversarial-review/probes/p_escaping_holes.py
+The scalar examples preserve the original reproduction. The container examples
+now show the round-2 ``EscapeError`` guard.
+
+Run from the repo root:
+  .venv/bin/python .scratch/projects/06-adversarial-review/probes/p_escaping_holes.py
 """
 
 import sys
@@ -11,7 +15,8 @@ sys.path.insert(0, "src")
 import yaml
 from minijinja import Environment
 
-from templateer.escaping import make_finalizer
+from templateer.escaping import EscapeError, make_finalizer
+from templateer.validators import check_round_trip
 
 
 def render(src, lang, **ctx):
@@ -39,14 +44,19 @@ for v in ["#redacted", "true", "value"]:
     print("  v=%-12r -> %-30r parsed=%r" % (v, out, yaml.safe_load(out)))
 
 print()
-print("=== B4: container interpolation bypasses the finalizer entirely ===")
-out = render("deps = {{ deps }}", "toml", deps=['a"\nINJECTED = "yes'])
-print("  list ->", repr(out))
-print("  note: single-quoted = a TOML *literal* string; escapes do not apply")
-out = render("x = {{ d }}", "toml", d={"k": "v"})
-print("  dict ->", repr(out), "(valid Python, invalid TOML)")
+print("=== B4: container interpolation is rejected by the finalizer ===")
+for name, value in (
+    ("list", ['a"\nINJECTED = "yes']),
+    ("dict", {"k": "v"}),
+):
+    try:
+        out = render("value = {{ value }}", "toml", value=value)
+        print(" ", name, "-> UNEXPECTED:", repr(out))
+    except EscapeError as error:
+        print(" ", name, "->", type(error).__name__ + ":", error)
 
 print()
-print("=== B4b: single-quoted TOML literal string breaks out ===")
-out = render("x = ['{{ v }}']", "toml", v="a', 'b")
-print("  ->", repr(out), "parsed:", tomllib.loads(out), "  <-- 1 value became 2")
+print("=== A1c: the runtime check catches a string that becomes a list ===")
+out = render("value = ['{{ value }}']", "toml", value="a', 'b")
+print("  artifact ->", repr(out), "parsed:", tomllib.loads(out))
+print("  findings ->", check_round_trip(out, "toml", {"value": "a', 'b"}))

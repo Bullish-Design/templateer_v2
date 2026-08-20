@@ -1,4 +1,12 @@
-import sys, ast, json, tomllib
+"""B1 -- verify structured-language escaping across the guarded character set."""
+
+# ruff: noqa: E402, I001
+
+import ast
+import json
+import sys
+import tomllib
+
 sys.path.insert(0, "/home/andrew/Documents/Projects/templateer_v2/src")
 import yaml
 from templateer.escaping import escape_string

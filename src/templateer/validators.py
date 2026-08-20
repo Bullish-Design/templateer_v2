@@ -263,9 +263,12 @@ def check_round_trip(
     value ``"true"`` reaches an unquoted YAML site as the boolean ``True``,
     and every other layer reports success.
 
-    The rule (CONTRACT.md §4).  For each string leaf ``v`` of *model_dump*,
-    compute what the target language reads if ``v`` lands unquoted.  Report a
-    finding when three things hold together:
+    The check first compares model strings with artifact values at the same
+    mapping or list path. This catches a string that becomes a container.
+
+    The fallback supports templates that move values to different paths. For
+    each string leaf ``v`` of *model_dump*, compute what the target language
+    reads if ``v`` lands unquoted. Report a finding when three things hold:
 
     1. the re-lexed value is not a string,
     2. the re-lexed value appears among the artifact's non-string leaves, and
@@ -286,13 +289,28 @@ def check_round_trip(
     if language not in STRUCTURED_LANGUAGES:
         return []
 
-    leaves = _artifact_leaves(artifact, language)
-    if leaves is None:
+    artifact_data = _artifact_data(artifact, language)
+    if artifact_data is _UNREADABLE:
         return []  # unparseable: the parse validator reports that
-    strings, others = leaves
+    strings, others = _artifact_leaves(artifact_data, language)
 
     findings: list[str] = []
+    aligned_paths: set[str] = set()
+    if language != "python":
+        for path, model_value, artifact_value in _aligned_string_changes(
+            model_dump, artifact_data
+        ):
+            aligned_paths.add(path)
+            findings.append(
+                f"{path}: the schema declares str and the model holds "
+                f"{model_value!r}, but the artifact carries it as "
+                f"{_type_name(artifact_value)} ({artifact_value!r}) — "
+                "quote the interpolation"
+            )
+
     for path, value in _model_strings(model_dump):
+        if path in aligned_paths:
+            continue
         relexed = _relex(value, language)
         if relexed is _UNREADABLE or isinstance(relexed, str):
             continue
@@ -308,31 +326,63 @@ def check_round_trip(
     return findings
 
 
-def _artifact_leaves(
-    artifact: str, language: str
-) -> tuple[set[str], list[Any]] | None:
-    """Return ``(string leaves, non-string leaves)`` of a parsed artifact.
+def _artifact_data(artifact: str, language: str) -> Any:
+    """Parse *artifact*, or return the sentinel when parsing fails.
 
-    Returns ``None`` when the artifact does not parse.
+    Python source has no general data root, so a successful parse returns its
+    abstract syntax tree. ``_artifact_leaves`` records the tree's constants.
     """
-    strings: set[str] = set()
-    others: list[Any] = []
     try:
         if language == "python":
-            for node in ast.walk(ast.parse(artifact)):
-                if isinstance(node, ast.Constant):
-                    _record(node.value, strings, others)
-            return strings, others
+            return ast.parse(artifact)
         if language == "toml":
-            data: Any = tomllib.loads(artifact)
-        elif language == "json":
-            data = json.loads(artifact)
-        else:
-            data = yaml.safe_load(artifact)
+            return tomllib.loads(artifact)
+        if language == "json":
+            return json.loads(artifact)
+        return yaml.safe_load(artifact)
     except Exception:
-        return None
-    _walk(data, strings, others)
+        return _UNREADABLE
+
+
+def _artifact_leaves(
+    artifact_data: Any, language: str
+) -> tuple[set[str], list[Any]]:
+    """Return the string and non-string leaves of parsed artifact data."""
+    strings: set[str] = set()
+    others: list[Any] = []
+    if language == "python":
+        for node in ast.walk(artifact_data):
+            if isinstance(node, ast.Constant):
+                _record(node.value, strings, others)
+        return strings, others
+    _walk(artifact_data, strings, others)
     return strings, others
+
+
+def _aligned_string_changes(
+    model_value: Any, artifact_value: Any, path: str = ""
+) -> Iterator[tuple[str, str, Any]]:
+    """Yield model strings that changed type at the same artifact path."""
+    if isinstance(model_value, str):
+        if not isinstance(artifact_value, str):
+            yield path or "<root>", model_value, artifact_value
+        return
+    if isinstance(model_value, dict) and isinstance(artifact_value, dict):
+        for key, item in model_value.items():
+            if key not in artifact_value:
+                continue
+            child = f"{path}.{key}" if path else str(key)
+            yield from _aligned_string_changes(item, artifact_value[key], child)
+        return
+    if isinstance(model_value, (list, tuple)) and isinstance(
+        artifact_value, (list, tuple)
+    ):
+        for index, (model_item, artifact_item) in enumerate(
+            zip(model_value, artifact_value, strict=False)
+        ):
+            yield from _aligned_string_changes(
+                model_item, artifact_item, f"{path}[{index}]"
+            )
 
 
 def _walk(value: Any, strings: set[str], others: list[Any]) -> None:

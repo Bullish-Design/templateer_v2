@@ -1,4 +1,4 @@
-"""Surface guardrails — §A4, §A8, §A9, §B2, §B6, §B7, §B8, §C2, §C7.
+"""Surface guardrails — §A4, §A8, §A9, §B2, §B6, §B7, §B8, §C1, §C2, §C7.
 
 The library advertises itself for agent frameworks.  These tests exercise the
 promises that claim makes: an async entry point, a repair loop that learns, a
@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import importlib.metadata
 import sys
+import tomllib
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -55,6 +56,16 @@ BOTH_STREAMS = [
     f"import sys; sys.stdout.write({_OUT}); sys.stderr.write({_ERR}); sys.exit(1)",
 ]
 CLEAN_EXIT = [sys.executable, "-c", "import sys; sys.stdout.write('fine')"]
+
+
+@pytest.mark.finding_c1
+def test_wheel_configuration_excludes_the_development_templates() -> None:
+    """The installed package must not imply a bundled template catalog."""
+    project = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
+    wheel = project["tool"]["hatch"]["build"]["targets"]["wheel"]
+
+    assert wheel["packages"] == ["src/templateer"]
+    assert "templates" not in wheel.get("include", [])
 
 
 def _catalog(template_dir: Path) -> TemplateCatalog:

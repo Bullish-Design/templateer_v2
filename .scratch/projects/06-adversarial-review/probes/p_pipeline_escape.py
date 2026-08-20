@@ -62,10 +62,10 @@ a4.mkdir(parents=True)
     "renderer: {engine: minijinja, file: ../../outside.j2}\n"
 )
 
+import templateer.pipeline as pipeline  # noqa: E402
 from templateer.catalog import TemplateCatalog  # noqa: E402
 from templateer.result import GenerationRequest  # noqa: E402
 from templateer.template import TemplateLoadError  # noqa: E402
-import templateer.pipeline as P  # noqa: E402
 
 catalog = TemplateCatalog()
 catalog.load_from_paths([work / "templates"])
@@ -89,13 +89,13 @@ async def _stub_async(template, **kw):
 
 
 # The generator entry point is sync before Wave 3a and async after it.
-if hasattr(P, "generate_model_async"):
-    P.generate_model_async = _stub_async
+if hasattr(pipeline, "generate_model_async"):
+    pipeline.generate_model_async = _stub_async
 else:
-    P.generate_model = lambda template, **kw: template.get_schema_class()(x="hi")
+    pipeline.generate_model = lambda template, **kw: template.get_schema_class()(x="hi")
 
 try:
-    result = P.generate(
+    result = pipeline.generate(
         catalog,
         GenerationRequest(
             template_name="escape-renderer", user_request="x", max_attempts=1

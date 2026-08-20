@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
-# A2 + A3 -- `templateer check` prints a proof after auditing nothing.
+# A2 + A3 -- guard closed languages and make an empty audit visible.
+#
+# Round 2 changes both outcomes. Case 1 reports no fixtures and exits 1.
+# Case 2 rejects the unknown language during template loading and exits 3.
 #
 # Run from the repo root:  bash .scratch/projects/06-adversarial-review/probes/p_audit_vacuous.sh
 set -u
@@ -35,5 +38,4 @@ echo '{"x": "hi"}' > templates/noex/examples/a.input.json
 "$PY" -m templateer.cli check noex; echo "exit=$?"
 
 echo
-echo '  In both cases audit_template() probed zero fields and check reported a'
-echo "  pass.  The concept doc's motivating list opens with devenv.nix."
+echo '  Round 2 makes both silent cases visible and non-zero.'

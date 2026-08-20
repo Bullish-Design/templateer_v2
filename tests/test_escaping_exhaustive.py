@@ -90,6 +90,14 @@ def test_astral_character_still_round_trips() -> None:
         assert load(escape_string(original)) == original, language
 
 
+@pytest.mark.finding_b1
+@pytest.mark.parametrize("separator", ["\u2028", "\u2029"], ids=["U+2028", "U+2029"])
+def test_yaml_line_separator_preserves_adjacent_spaces(separator: str) -> None:
+    """YAML must not fold spaces around a raw line separator."""
+    original = f"left {separator} right"
+    assert LOADERS["yaml"](escape_string(original)) == original
+
+
 # ---------------------------------------------------------------------------
 # §B4 — containers at a `{{ }}` site
 # ---------------------------------------------------------------------------

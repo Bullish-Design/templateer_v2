@@ -42,13 +42,13 @@ _BOOLEANS = {
 # folds U+0085 (NEL) to a space, which corrupts the value silently.  U+007F
 # (DEL) is the case this module patched before.
 #
-# U+FFFE and U+FFFF are noncharacters; PyYAML raises ``ReaderError`` on them
-# too, and the same escape clears it.
+# U+2028 and U+2029 are YAML line separators. PyYAML can fold adjacent spaces
+# around a raw separator, which changes the value. The character-by-character
+# sweep missed that interaction. Escaping each separator preserves the value.
 #
-# U+2028, U+2029 and U+FEFF are *not* here.  Measured against all four
-# loaders, at four positions, in multi-line documents: each one round-trips
-# raw.  Escaping them would be an untested precaution.
-_UNSAFE = re.compile(r"[\x00-\x1f\x7f-\x9f\ufffe\uffff]")
+# U+FFFE and U+FFFF are noncharacters. PyYAML raises ``ReaderError`` on them,
+# and the same escape clears it. U+FEFF round-trips raw.
+_UNSAFE = re.compile(r"[\x00-\x1f\x7f-\x9f\u2028\u2029\ufffe\uffff]")
 
 # A lone surrogate is unrepresentable in TOML ("Escaped character is not a
 # Unicode scalar value"), breaks PyYAML, and breaks ``ast.literal_eval``.
@@ -71,9 +71,9 @@ def escape_string(value: str) -> str:
 
     ``ensure_ascii=False`` is required: the default emits UTF-16 surrogate
     pairs for astral characters, and TOML rejects surrogates.  ``json.dumps``
-    then leaves U+007F, the C1 controls and the two BMP noncharacters bare,
-    so this function escapes them as ``\\uXXXX`` — the one escape form all
-    four grammars share.
+    then leaves U+007F, the C1 controls, the YAML line separators, and the two
+    BMP noncharacters bare. This function escapes them as ``\\uXXXX``, which
+    all four grammars share.
 
     Raises:
         EscapeError: *value* holds a lone surrogate (U+D800-U+DFFF).  TOML

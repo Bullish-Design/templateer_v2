@@ -122,6 +122,19 @@ def test_toml_str_field_reaching_artifact_as_int_is_reported(
     assert any("name" in f for f in findings), findings
 
 
+@pytest.mark.finding_a1
+def test_toml_str_field_reaching_artifact_as_list_is_reported() -> None:
+    """A single-quoted TOML site can split one string into list items."""
+    model_dump = {"value": "a', 'b"}
+    artifact = "value = ['a', 'b']"
+
+    findings = _check_round_trip()(artifact, "toml", model_dump)
+
+    assert findings, "a str field landing as a list must be reported"
+    assert "value" in findings[0]
+    assert "list" in findings[0]
+
+
 # ---------------------------------------------------------------------------
 # The check must stay silent where nothing is wrong
 # ---------------------------------------------------------------------------

@@ -1,7 +1,16 @@
-import sys, ast, json, tomllib, random
+"""B1 -- fuzz structured-language escaping and count safe rejections."""
+
+# ruff: noqa: E402, I001
+
+import ast
+import json
+import random
+import sys
+import tomllib
+
 sys.path.insert(0, "/home/andrew/Documents/Projects/templateer_v2/src")
 import yaml
-from templateer.escaping import escape_string
+from templateer.escaping import EscapeError, escape_string
 
 random.seed(7)
 alphabet = list('ab"\\') + [
@@ -10,10 +19,15 @@ alphabet = list('ab"\\') + [
     "@", ",", ":", "-", " ", "", "é", "\U0001F600", "\ud800",
 ]
 bad = []
+rejected = 0
 N = 4000
 for _ in range(N):
     s = "".join(random.choice(alphabet) for _ in range(random.randint(0, 8)))
-    e = escape_string(s)
+    try:
+        e = escape_string(s)
+    except EscapeError:
+        rejected += 1
+        continue
     for lang, load in (
         ("toml", lambda t: tomllib.loads('k = "%s"' % t)["k"]),
         ("json", lambda t: json.loads('{"k": "%s"}' % t)["k"]),
@@ -27,7 +41,7 @@ for _ in range(N):
         except Exception as ex:
             bad.append((lang, repr(s), "%s: %s" % (type(ex).__name__, str(ex)[:70])))
 
-print("  cases:", N * 4, "| failures:", len(bad))
+print("  cases:", N * 4, "| rejected inputs:", rejected, "| failures:", len(bad))
 seen = set()
 for b in bad:
     k = (b[0], b[2][:45])
