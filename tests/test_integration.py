@@ -318,10 +318,20 @@ def test_template_catalog_integration_end_to_end(
 @pytest.mark.parametrize("name", [p.name for p in sorted(Path("templates").iterdir())
                                   if (p / "metadata.yml").exists()])
 def test_bundled_template_resists_injection(name):
-    """Every bundled template passes the escaping audit — 0 findings."""
+    """Every bundled template passes the escaping audit — 0 findings.
+
+    §A3: ``audit_template`` returns an ``AuditReport``, not a bare list.
+    ``[] == []`` used to be true both when the audit found nothing wrong
+    and when it audited nothing at all.  Assert both halves now: the audit
+    ran, and it found nothing.
+    """
     from templateer.audit import audit_template
 
-    assert audit_template(Template(Path("templates") / name)) == []
+    report = audit_template(Template(Path("templates") / name))
+    assert report.audited, f"nothing audited: {report.skipped_reason}"
+    assert report.findings == []
+    assert report.ok
+    assert report.fixtures_seen > 0
 
 
 # ── Invariant checks ──

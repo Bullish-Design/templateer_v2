@@ -13,6 +13,51 @@ import pytest
 from click.testing import CliRunner
 
 from templateer.cli import main
+from templateer.result import FailureReason
+
+# ---------------------------------------------------------------------------
+# Exit codes (§A7, CONTRACT §9)
+# ---------------------------------------------------------------------------
+#
+# The CLI used to exit 1 for every failure, so an agent had to parse English
+# to tell "no such template" from "the LLM failed" from "the artifact is
+# invalid".  Each failure class now has its own code.  Tests assert against
+# ``EXIT_CODES`` rather than a literal, so the map stays the single source.
+
+# ``cli.EXIT_CODES`` arrives in wave 3b, so it is imported inside the helper.
+# That keeps the rest of this module collectable until then.
+
+
+def exit_code(reason: FailureReason) -> int:
+    """The CLI's exit code for *reason*."""
+    from templateer.cli import EXIT_CODES
+
+    return EXIT_CODES[reason]
+
+
+NO_TEMPLATE = FailureReason.NO_TEMPLATE                  # -> 3, usage
+MODEL_INVALID = FailureReason.MODEL_VALIDATION_FAILED    # -> 1, finding
+OUTPUT_INVALID = FailureReason.OUTPUT_VALIDATION_FAILED  # -> 1, finding
+
+# CONTRACT §9 also pins the failures that carry no ``FailureReason``.  A file
+# the caller named on the command line is a usage error, whether it is absent
+# or unparseable, so ``--input`` and ``--context`` both exit 3.
+USAGE_EXIT = 3
+
+
+def test_exit_code_map_matches_the_contract() -> None:
+    """CONTRACT §9 pins the map; it is exported so a test can assert it."""
+    from templateer.cli import EXIT_CODES
+
+    assert EXIT_CODES == {
+        FailureReason.MODEL_VALIDATION_FAILED: 1,
+        FailureReason.RENDER_FAILED: 1,
+        FailureReason.OUTPUT_VALIDATION_FAILED: 1,
+        FailureReason.CONFIG_ERROR: 2,
+        FailureReason.LLM_FAILED: 2,
+        FailureReason.NO_TEMPLATE: 3,
+    }
+
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -83,11 +128,15 @@ class TestDescribeTemplate:
         assert "pyproject-uv" in result.output
         assert "Description:" in result.output
         assert "Output language:" in result.output
+        # §A7: describe printed a raw Python set repr —
+        # ``Trigger paths: {'pyproject.toml'}``.  It prints a sorted list now.
+        assert "pyproject.toml" in result.output
+        assert "{'pyproject.toml'}" not in result.output
 
     def test_describe_unknown_template(self, runner: CliRunner, templates_arg: list[str]) -> None:
-        """Describe of an unknown template exits with error."""
+        """Describe of an unknown template exits with the usage code."""
         result = runner.invoke(main, ["describe", "nonexistent", *templates_arg])
-        assert result.exit_code == 1
+        assert result.exit_code == exit_code(NO_TEMPLATE)
 
 
 # ---------------------------------------------------------------------------
@@ -119,9 +168,9 @@ class TestShowSchema:
         assert "dependencies" in props
 
     def test_schema_unknown_template(self, runner: CliRunner, templates_arg: list[str]) -> None:
-        """Schema of an unknown template exits with error."""
+        """Schema of an unknown template exits with the usage code."""
         result = runner.invoke(main, ["schema", "nonexistent", *templates_arg])
-        assert result.exit_code == 1
+        assert result.exit_code == exit_code(NO_TEMPLATE)
 
 
 # ---------------------------------------------------------------------------
@@ -185,7 +234,7 @@ class TestRenderFromModel:
         templates_arg: list[str],
         tmp_path: Path,
     ) -> None:
-        """Render with invalid model data exits with error."""
+        """Render with invalid model data exits with the finding code."""
         bad_input = tmp_path / "bad_input.json"
         bad_input.write_text("{}")
 
@@ -199,7 +248,7 @@ class TestRenderFromModel:
                 *templates_arg,
             ],
         )
-        assert result.exit_code == 1
+        assert result.exit_code == exit_code(MODEL_INVALID)
 
     def test_render_unknown_template(
         self,
@@ -207,7 +256,7 @@ class TestRenderFromModel:
         templates_arg: list[str],
         fastapi_input_file: Path,
     ) -> None:
-        """Render with unknown template exits with error."""
+        """Render with unknown template exits with the usage code."""
         result = runner.invoke(
             main,
             [
@@ -218,14 +267,18 @@ class TestRenderFromModel:
                 *templates_arg,
             ],
         )
-        assert result.exit_code == 1
+        assert result.exit_code == exit_code(NO_TEMPLATE)
 
     def test_render_missing_input_file(
         self,
         runner: CliRunner,
         templates_arg: list[str],
     ) -> None:
-        """Render with missing input file exits with error."""
+        """Render with a missing input file exits with the usage code.
+
+        CONTRACT §9: a missing or unparseable ``--input`` file is a usage
+        error, so it exits 3 like an unknown template name.
+        """
         result = runner.invoke(
             main,
             [
@@ -236,7 +289,7 @@ class TestRenderFromModel:
                 *templates_arg,
             ],
         )
-        assert result.exit_code == 1
+        assert result.exit_code == USAGE_EXIT
 
     def test_render_matches_fastapi_fixture(
         self,
@@ -371,7 +424,7 @@ class TestValidateOutput:
         templates_arg: list[str],
         tmp_path: Path,
     ) -> None:
-        """Validate fails (exit 1) for an invalid model."""
+        """Validate fails with the finding code for an invalid model."""
         bad = tmp_path / "bad.json"
         bad.write_text("{}")
 
@@ -385,7 +438,7 @@ class TestValidateOutput:
                 *templates_arg,
             ],
         )
-        assert result.exit_code == 1
+        assert result.exit_code == exit_code(MODEL_INVALID)
         assert "Model validation failed" in result.output
 
     def test_validate_unknown_template(
@@ -394,7 +447,7 @@ class TestValidateOutput:
         templates_arg: list[str],
         fastapi_input_file: Path,
     ) -> None:
-        """Validate with unknown template exits with error."""
+        """Validate with unknown template exits with the usage code."""
         result = runner.invoke(
             main,
             [
@@ -405,7 +458,7 @@ class TestValidateOutput:
                 *templates_arg,
             ],
         )
-        assert result.exit_code == 1
+        assert result.exit_code == exit_code(NO_TEMPLATE)
 
 
 # ---------------------------------------------------------------------------
@@ -425,7 +478,7 @@ class TestGenerateArtifact:
         runner: CliRunner,
         templates_arg: list[str],
     ) -> None:
-        """Generate with unknown template exits with error."""
+        """Generate with unknown template exits with the usage code."""
         result = runner.invoke(
             main,
             [
@@ -436,7 +489,7 @@ class TestGenerateArtifact:
                 *templates_arg,
             ],
         )
-        assert result.exit_code == 1
+        assert result.exit_code == exit_code(NO_TEMPLATE)
         assert "Generation failed" in result.output
 
     def test_generate_defaults_request(
@@ -454,7 +507,7 @@ class TestGenerateArtifact:
                 *templates_arg,
             ],
         )
-        assert result.exit_code == 1
+        assert result.exit_code == exit_code(NO_TEMPLATE)
         # The default request is set internally; the failure should
         # still be a clean generation failure.
         assert "Generation failed" in result.output
@@ -480,7 +533,7 @@ class TestGenerateArtifact:
                 *templates_arg,
             ],
         )
-        assert result.exit_code == 1
+        assert result.exit_code == exit_code(NO_TEMPLATE)
 
     def test_generate_invalid_context_file(
         self,
@@ -488,7 +541,10 @@ class TestGenerateArtifact:
         templates_arg: list[str],
         tmp_path: Path,
     ) -> None:
-        """Generate with missing context file exits with error."""
+        """Generate with a missing context file exits with the usage code.
+
+        CONTRACT §9: a missing ``--context`` file is a usage error.
+        """
         result = runner.invoke(
             main,
             [
@@ -499,7 +555,7 @@ class TestGenerateArtifact:
                 *templates_arg,
             ],
         )
-        assert result.exit_code == 1
+        assert result.exit_code == USAGE_EXIT
 
     def test_generate_invalid_json_context(
         self,
@@ -507,7 +563,12 @@ class TestGenerateArtifact:
         templates_arg: list[str],
         tmp_path: Path,
     ) -> None:
-        """Generate with invalid JSON context exits with error."""
+        """Generate with an unparseable JSON context exits with the usage code.
+
+        CONTRACT §9: an unparseable ``--context`` file is a usage error —
+        the same code as a missing one.  The caller named a bad file either
+        way.
+        """
         bad_ctx = tmp_path / "bad_context.json"
         bad_ctx.write_text("not json {{{")
 
@@ -521,7 +582,7 @@ class TestGenerateArtifact:
                 *templates_arg,
             ],
         )
-        assert result.exit_code == 1
+        assert result.exit_code == USAGE_EXIT
 
     def test_generate_with_nested_context_format(
         self,
@@ -556,7 +617,7 @@ class TestGenerateArtifact:
                 *templates_arg,
             ],
         )
-        assert result.exit_code == 1
+        assert result.exit_code == exit_code(NO_TEMPLATE)
 
 
 # ---------------------------------------------------------------------------
@@ -674,15 +735,21 @@ class TestCheckCommand:
     def test_check_passes_for_sound_template(
         self, runner: CliRunner, templates_arg: list[str]
     ) -> None:
-        """A template that resists injection passes the audit."""
+        """A template that resists injection passes the audit.
+
+        §A3: ``check`` used to print ``✓ escaping audit passed`` even when it
+        audited nothing.  It prints the ``AuditReport`` counts now, so the
+        output says how much work the audit did.
+        """
         result = runner.invoke(main, ["check", "pyproject-uv", *templates_arg])
         assert result.exit_code == 0
-        assert "escaping audit passed" in result.output
+        assert "0 findings" in result.output
+        assert "fixture" in result.output.lower()
 
     def test_check_unknown_template(self, runner: CliRunner, templates_arg: list[str]) -> None:
-        """Check of an unknown template exits with error."""
+        """Check of an unknown template exits with the usage code."""
         result = runner.invoke(main, ["check", "nonexistent", *templates_arg])
-        assert result.exit_code == 1
+        assert result.exit_code == exit_code(NO_TEMPLATE)
 
 
 # ---------------------------------------------------------------------------
@@ -743,7 +810,7 @@ class TestDeclaredValidators:
         result = runner.invoke(main, [
             "validate", "tpl", "--input", str(model_file), "--paths", str(tdir),
         ])
-        assert result.exit_code == 1
+        assert result.exit_code == exit_code(OUTPUT_INVALID)
         assert "Custom parse (json)" in result.output
 
     def test_render_command_validates_before_writing(
@@ -759,7 +826,7 @@ class TestDeclaredValidators:
             "render", "tpl", "--input", str(model_file),
             "--output", str(out_file), "--paths", str(tdir),
         ])
-        assert result.exit_code == 1
+        assert result.exit_code == exit_code(OUTPUT_INVALID)
         assert not out_file.exists()
         assert "Output validation failed" in result.output
 

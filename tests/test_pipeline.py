@@ -174,8 +174,12 @@ class TestRetryBehavior:
         assert result.attempt == 1
 
     def test_retryable_failure_retries_up_to_max(self, catalog: TemplateCatalog) -> None:
-        """LLM_FAILED is retried until max_attempts is reached."""
-        with patch("templateer.pipeline.generate_model",
+        """LLM_FAILED is retried until max_attempts is reached.
+
+        CONTRACT §7 adds backoff before an LLM_FAILED retry.  It must stay
+        short and patchable, so this test never sleeps for long.
+        """
+        with patch("templateer.pipeline.generate_model_async",
                    side_effect=RuntimeError("network")):
             result = generate(catalog, GenerationRequest(
                 template_name="pyproject-uv", user_request="x", max_attempts=3))
@@ -187,11 +191,11 @@ class TestRetryBehavior:
     ) -> None:
         """Regression: max_retries used to be passed the accumulated pipeline
         attempt count, inflating the LLM budget 3 -> 4 -> 5."""
-        with patch("templateer.pipeline.generate_model",
+        with patch("templateer.pipeline.generate_model_async",
                    side_effect=RuntimeError("network")) as mock_gen:
             generate(catalog, GenerationRequest(
                 template_name="pyproject-uv", user_request="x", max_attempts=3))
-        # generate_model now takes no retries argument; each call uses the
+        # generate_model_async takes no retries argument; each call uses the
         # fixed internal MODEL_OUTPUT_RETRIES.
         for call in mock_gen.call_args_list:
             assert "retries" not in call.kwargs
@@ -204,14 +208,15 @@ class TestRetryBehavior:
 
 class TestEndToEndWithoutLLM:
     """Integration-style tests exercising the full pipeline with a stubbed
-    generate_model — no LLM API key required."""
+    generate_model_async — no LLM API key required."""
 
     def _stub_generate_model(self):
-        def _make_valid_model(template, **kwargs):
+        """§A8/CONTRACT §7: the stub is async and returns ``(model, usage)``."""
+        async def _make_valid_model(template, **kwargs):
             data = json.loads(
                 Path("templates/pyproject-uv/examples/fastapi.input.json").read_text()
             )
-            return template.get_schema_class().model_validate(data)
+            return template.get_schema_class().model_validate(data), None
         return _make_valid_model
 
     def test_full_pipeline_resolve_render_validate(
@@ -238,7 +243,7 @@ class TestEndToEndWithoutLLM:
 
     def test_pipeline_success_with_stubbed_generator(self, catalog: TemplateCatalog) -> None:
         """The full pipeline succeeds when generate_model returns a model."""
-        with patch("templateer.pipeline.generate_model",
+        with patch("templateer.pipeline.generate_model_async",
                    side_effect=self._stub_generate_model()):
             result = generate(catalog, GenerationRequest(
                 template_name="pyproject-uv", user_request="make a thing"))
@@ -252,7 +257,7 @@ class TestEndToEndWithoutLLM:
         """A render failure is captured as RENDER_FAILED, not raised."""
         from templateer.renderer import RenderError
 
-        with patch("templateer.pipeline.generate_model",
+        with patch("templateer.pipeline.generate_model_async",
                    side_effect=self._stub_generate_model()):
             with patch("templateer.template.Template.render",
                        side_effect=RenderError("boom")):

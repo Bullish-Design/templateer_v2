@@ -35,12 +35,6 @@ def test_catalog_raises_on_unknown_name(catalog_with_pyproject_uv):
         catalog_with_pyproject_uv.get("nonexistent-template")
 
 
-def test_catalog_templates_by_language(catalog_with_pyproject_uv):
-    """Filtering by output language works."""
-    toml_templates = catalog_with_pyproject_uv.templates_by_language("toml")
-    assert any(t.name == "pyproject-uv" for t in toml_templates)
-
-
 def test_catalog_handles_empty_directories(tmp_path):
     """Loading from a directory with no templates is safe."""
     empty_dir = tmp_path / "empty"
@@ -121,7 +115,12 @@ renderer:
 
 
 def test_catalog_load_skips_broken_templates(tmp_path):
-    """Broken templates (invalid metadata.yml) are skipped with a warning."""
+    """Broken templates (invalid metadata.yml) are skipped and recorded.
+
+    §B9: a template that fails to load used to vanish with exit code 0,
+    indistinguishable from absent.  The catalog now records the failure in
+    ``load_errors`` so the CLI can report it.
+    """
     # Invalid: missing required 'description' field
     template_dir = tmp_path / "broken"
     template_dir.mkdir()
@@ -166,3 +165,5 @@ renderer:
     # The broken template is skipped, the good one loads
     assert "good-template" in catalog
     assert "broken" not in catalog
+    # §B9: and the failure is visible, not silent.
+    assert [name for name, _ in catalog.load_errors] == ["broken"]

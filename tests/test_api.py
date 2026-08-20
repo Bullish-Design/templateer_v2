@@ -177,6 +177,20 @@ class TestRenderFromModel:
         with pytest.raises(ValidationError):
             registry.render_from_model("pyproject-uv", {})
 
+    def test_render_from_model_non_mapping_raises_validation_error(
+        self, registry: TemplateRegistry
+    ) -> None:
+        """§B8: non-mapping input raises ValidationError, not TypeError.
+
+        The method used to splat with ``schema_class(**model_data)`` while
+        the CLI used ``model_validate``.  Two surfaces, two error types for
+        the same mistake.  ``model_validate`` is now the single path.
+        """
+        with pytest.raises(ValidationError):
+            registry.render_from_model("pyproject-uv", "not a mapping")
+        with pytest.raises(ValidationError):
+            registry.render_from_model("pyproject-uv", ["not", "a", "mapping"])
+
     def test_render_from_model_deterministic(
         self, registry: TemplateRegistry, fastapi_input: dict
     ) -> None:
@@ -200,19 +214,24 @@ class TestRenderFromModel:
 
 
 class TestValidateArtifact:
-    """Tests for the validate_artifact method."""
+    """Tests for the validate_artifact method.
+
+    §B8/CONTRACT §8: ``validate_artifact`` returns ``(errors, warnings)``.
+    It used to return a bare error list and discard the warnings.
+    """
 
     def test_validate_valid_toml(self, registry: TemplateRegistry) -> None:
         """Valid TOML passes validation."""
-        errors = registry.validate_artifact(
+        errors, warnings = registry.validate_artifact(
             "pyproject-uv",
             '[project]\nname = "test"\n',
         )
         assert errors == []
+        assert warnings == []
 
     def test_validate_invalid_toml(self, registry: TemplateRegistry) -> None:
         """Invalid TOML produces validation errors."""
-        errors = registry.validate_artifact(
+        errors, _ = registry.validate_artifact(
             "pyproject-uv",
             "not valid toml {{{",
         )
@@ -226,13 +245,35 @@ class TestValidateArtifact:
     def test_validate_valid_fixture_output(self, registry: TemplateRegistry) -> None:
         """The FastAPI output fixture passes validation."""
         output = (Path("templates/pyproject-uv/examples/fastapi.output.toml")).read_text()
-        errors = registry.validate_artifact("pyproject-uv", output)
+        errors, warnings = registry.validate_artifact("pyproject-uv", output)
         assert errors == []
+        assert warnings == []
 
     def test_validate_invalid_toml_balanced_braces(self, registry: TemplateRegistry) -> None:
         """Invalid TOML with unbalanced braces fails validation."""
-        errors = registry.validate_artifact("pyproject-uv", "[project\nname = [[[")
+        errors, _ = registry.validate_artifact("pyproject-uv", "[project\nname = [[[")
         assert len(errors) > 0
+
+    def test_validate_with_model_data_reports_type_confusion(
+        self, registry: TemplateRegistry
+    ) -> None:
+        """§A1/§B8: given ``model_data``, validate_artifact runs the
+        round-trip check and folds its findings into ``errors``.
+
+        ``project_description`` is a declared ``str``.  An artifact that
+        carries it as a TOML boolean parses cleanly, so only the round-trip
+        check can see the mismatch.
+        """
+        artifact = '[project]\nname = "ok"\ndescription = true\n'
+        model_data = {
+            "project_name": "ok",
+            "python_version": "3.12",
+            "project_description": "true",
+        }
+        errors, _ = registry.validate_artifact(
+            "pyproject-uv", artifact, model_data=model_data
+        )
+        assert errors, "the round-trip check must see str -> bool"
 
 
 # ---------------------------------------------------------------------------
@@ -248,14 +289,19 @@ def _valid_model():
     return Template(Path("templates/pyproject-uv")).get_schema_class()(**data)
 
 
+async def _stub_generate_model(*args, **kwargs):
+    """§A8/CONTRACT §7: the LLM call is async and returns ``(model, usage)``."""
+    return _valid_model(), None
+
+
 class TestGenerate:
     """Tests for the generate method (full pipeline)."""
 
     def test_generate_uses_the_pipeline(self, registry: TemplateRegistry) -> None:
         """api.generate delegates rather than re-deriving. Currently ZERO
         non-LLM coverage: all four existing tests are @has_api_key gated."""
-        with patch("templateer.pipeline.generate_model",
-                   lambda *a, **k: _valid_model()):
+        with patch("templateer.pipeline.generate_model_async",
+                   side_effect=_stub_generate_model):
             result = registry.generate("pyproject-uv", "make a thing")
         assert result.succeeded
         assert result.artifact is not None
@@ -342,8 +388,9 @@ class TestIntegration:
     def test_render_then_validate(self, registry: TemplateRegistry, fastapi_input: dict) -> None:
         """Artifact produced by render_from_model passes validate_artifact."""
         rendered = registry.render_from_model("pyproject-uv", fastapi_input)
-        errors = registry.validate_artifact("pyproject-uv", rendered)
+        errors, warnings = registry.validate_artifact("pyproject-uv", rendered)
         assert errors == []
+        assert warnings == []
 
     def test_template_from_list_can_be_used(
         self, registry: TemplateRegistry, fastapi_input: dict
@@ -366,8 +413,9 @@ class TestIntegration:
         rendered = registry.render_from_model("pyproject-uv", input_data)
         assert rendered.strip() == expected.strip()
 
-        errors = registry.validate_artifact("pyproject-uv", rendered)
+        errors, warnings = registry.validate_artifact("pyproject-uv", rendered)
         assert errors == []
+        assert warnings == []
 
     def test_registry_from_empty_paths_is_empty(self, tmp_path: Path) -> None:
         """A registry from an empty dir has zero templates."""

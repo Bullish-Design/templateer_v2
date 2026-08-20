@@ -2,7 +2,7 @@
 
 Covers the proposal's gate (``TEMPLATEER-V2_OUTPUT_KIND_REGION.md`` §4)
 entirely offline: a fixture region template built in ``tmp_path``, a stubbed
-``generate_model`` (the same pattern as ``tests/test_pipeline.py``), and
+``generate_model_async`` (the same pattern as ``tests/test_pipeline.py``), and
 direct validator probes.  No LLM, no network, no argentic dependency.
 """
 
@@ -13,7 +13,7 @@ from unittest.mock import patch
 
 import pytest
 import yaml
-from pydantic import ValidationError
+from pydantic import TypeAdapter, ValidationError
 
 from templateer.catalog import TemplateCatalog
 from templateer.models import MarkdownValidator, OutputSpec, TemplateMetadata
@@ -86,10 +86,15 @@ def region_catalog(region_template: Path) -> TemplateCatalog:
     return c
 
 
-def _stub_generate_model(template, **kwargs):
+async def _stub_generate_model(template, **kwargs):
+    """Stand in for ``generator.generate_model_async``.
+
+    §A8/CONTRACT §7: the pipeline's LLM call is async and returns
+    ``(model, usage)``.
+    """
     data = json.loads(
         (template.root / "examples" / "ok.input.json").read_text(encoding="utf-8"))
-    return template.get_schema_class().model_validate(data)
+    return template.get_schema_class().model_validate(data), None
 
 
 # ---------------------------------------------------------------------------
@@ -99,6 +104,8 @@ def _stub_generate_model(template, **kwargs):
 def test_region_template_metadata_loads() -> None:
     meta = TemplateMetadata.model_validate(deepcopy(REGION_METADATA))
     assert meta.output.kind == "region"
+    # §A5: a region payload is a YAML data block; the language is pinned.
+    assert meta.output.language == "yaml"
     assert meta.output.region is not None
     assert meta.output.region.page == "docs/status.md"
     assert meta.output.region.ref == "$block-status"
@@ -109,7 +116,8 @@ def test_region_artifact_is_body_only_and_valid_yaml(
     region_catalog: TemplateCatalog,
 ) -> None:
     """Gate 1: payload splices as a clean fenced block — body-only YAML."""
-    with patch("templateer.pipeline.generate_model", side_effect=_stub_generate_model):
+    with patch("templateer.pipeline.generate_model_async",
+               side_effect=_stub_generate_model):
         result = generate(region_catalog, GenerationRequest(
             template_name="region-demo", user_request="make it", max_attempts=1))
     assert result.succeeded, result.error_detail
@@ -156,15 +164,26 @@ class TestValidateRegionPayload:
         assert validate_region_payload("status: ok\nitems:\n  - a\n") == []
 
     def test_accepts_clean_fenced_block(self) -> None:
-        # Tolerated for convenience; the contract is body-only (D1).
-        assert validate_region_payload("---\nstatus: ok\n---\n") == []
-        assert validate_region_payload("```yaml\nstatus: ok\n```\n") == []
+        """INVERTED (§B3): a fenced payload is now an error, not a tolerance.
+
+        This test used to assert both payloads were accepted.  The 05 guide
+        D1 says the page owns the fences and the artifact is bare YAML, so a
+        fenced artifact double-fences the block and corrupts the page.  The
+        old tolerance was also unreachable: the built-in YAML parse validator
+        rejects fenced text first.  Deleted, and inverted here.
+        """
+        errors = validate_region_payload("---\nstatus: ok\n---\n")
+        assert errors and "fence" in errors[0].lower()
+        errors = validate_region_payload("```yaml\nstatus: ok\n```\n")
+        assert errors and "fence" in errors[0].lower()
 
     def test_rejects_unclosed_fence(self) -> None:
+        # §B3: the leading fence line alone is now the error.
         errors = validate_region_payload("```yaml\nstatus: ok\n")
         assert errors and "fence" in errors[0].lower()
 
     def test_rejects_stray_interior_fence(self) -> None:
+        # §B3: the leading fence line is reported before the interior one.
         errors = validate_region_payload("```yaml\nstatus: ok\n```\nmore: x\n```\n")
         assert errors and "fence" in errors[0].lower()
 
@@ -197,7 +216,11 @@ class TestValidateRegionPayload:
 def test_markdown_validator_kind_is_in_the_union() -> None:
     """Explicit kind: 'markdown' is declarable, for full_file authors."""
     data = deepcopy(REGION_METADATA)
-    data["output"] = {**data["output"], "kind": "full_file", "region": None}
+    # §C8: FullFileOutput is extra=forbid and has no ``region`` field, so the
+    # key is dropped rather than set to None.
+    output = {**data["output"], "kind": "full_file"}
+    output.pop("region", None)
+    data["output"] = output
     data["validators"] = [{"kind": "markdown"}]
     meta = TemplateMetadata.model_validate(data)
     assert isinstance(meta.validators[0], MarkdownValidator)
@@ -212,7 +235,8 @@ def test_region_pipeline_fails_on_broken_payload(
 ) -> None:
     """The payload check is non-optional: even a 'clean' declared validator
     list cannot let a broken block through."""
-    with patch("templateer.pipeline.generate_model", side_effect=_stub_generate_model):
+    with patch("templateer.pipeline.generate_model_async",
+               side_effect=_stub_generate_model):
         with patch("templateer.template.Template.render",
                    return_value="```yaml\nstatus: nope\n"):
             result = generate(region_catalog, GenerationRequest(
@@ -237,6 +261,26 @@ def test_effective_validators_prepends_markdown_for_region(
 # ---------------------------------------------------------------------------
 
 def test_kind_defaults_to_full_file() -> None:
-    spec = OutputSpec(path="pyproject.toml", language="toml")
+    """§C8: metadata that omits ``kind`` still loads as ``full_file``.
+
+    ``OutputSpec`` is a discriminated-union alias now, so validate it with a
+    ``TypeAdapter`` instead of calling it.  ``FullFileOutput`` carries no
+    ``region`` attribute at all — that is stronger than ``region is None``.
+    """
+    from templateer.models import FullFileOutput
+
+    spec = TypeAdapter(OutputSpec).validate_python(
+        {"path": "pyproject.toml", "language": "toml"}
+    )
+    assert isinstance(spec, FullFileOutput)
     assert spec.kind == "full_file"
-    assert spec.region is None
+    assert getattr(spec, "region", None) is None
+
+
+def test_bundled_template_metadata_omits_kind_and_still_loads() -> None:
+    """§C8: ``templates/pyproject-uv/metadata.yml`` omits ``kind``."""
+    raw = yaml.safe_load(
+        Path("templates/pyproject-uv/metadata.yml").read_text(encoding="utf-8"))
+    assert "kind" not in raw["output"]
+    meta = TemplateMetadata.model_validate(raw)
+    assert meta.output.kind == "full_file"

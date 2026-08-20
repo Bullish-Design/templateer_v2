@@ -5,6 +5,9 @@ artifacts in TOML, JSON, YAML, and Python, and that custom validators
 (parse and command kinds) work as expected.
 """
 
+import pytest
+from pydantic import ValidationError
+
 from templateer.models import ParseValidator
 from templateer.validators import ValidatorSpec, validate_output
 
@@ -247,10 +250,34 @@ class TestCustomParseValidators:
         assert len(no_toml_errors) == 0
 
     def test_custom_parse_validator_unknown_language(self) -> None:
-        """Custom parse validator for unknown language is silently skipped."""
-        validators: list[ValidatorSpec] = [ParseValidator(kind="parse", language="unknown_lang")]
-        errors, _ = validate_output("some text", "unknown_lang", validators)
-        assert errors == []
+        """INVERTED (§A2): an unknown parse language fails at load.
+
+        This test used to assert the silence: a parse validator naming an
+        unknown language was skipped, and ``validate_output`` returned no
+        errors.  So ``language: "tomll"`` disabled the exact check the
+        template author asked for, and said nothing.
+
+        §A2 closed the language set on ``OutputSpec`` only.  The same hole
+        sits one level down on ``ParseValidator``, which the review missed.
+        ``ParseValidator.language`` is a ``StructuredLanguage`` now: a parse
+        validator only ever runs for the four structured languages, so any
+        other value is a typo and must fail at model validation.
+        """
+        with pytest.raises(ValidationError):
+            ParseValidator(kind="parse", language="unknown_lang")
+
+    def test_custom_parse_validator_rejects_an_unstructured_language(self) -> None:
+        """§A2: ``markdown`` and ``text`` have no parser, so they are not
+        parse-validator languages either."""
+        for language in ("markdown", "text"):
+            with pytest.raises(ValidationError):
+                ParseValidator(kind="parse", language=language)
+
+    def test_custom_parse_validator_accepts_every_structured_language(self) -> None:
+        """§A2: the four structured languages all still load."""
+        for language in ("toml", "json", "yaml", "python"):
+            validator = ParseValidator(kind="parse", language=language)
+            assert validator.language == language
 
 
 # ---------------------------------------------------------------------------

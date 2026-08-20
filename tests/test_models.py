@@ -5,7 +5,7 @@ from typing import Any
 
 import pytest
 import yaml
-from pydantic import ValidationError
+from pydantic import TypeAdapter, ValidationError
 
 from templateer.models import (
     CommandValidator,
@@ -16,6 +16,10 @@ from templateer.models import (
     SchemaRef,
     TemplateMetadata,
 )
+
+# ``FullFileOutput`` arrives with the §C8 discriminated union in wave 1.  It
+# is imported inside each test that needs it, so the rest of this module
+# still collects until then.
 
 
 def test_template_metadata_parses_from_minimal_dict() -> None:
@@ -89,10 +93,28 @@ def test_schema_ref_uses_alias() -> None:
 
 
 def test_output_spec_requires_fields() -> None:
-    """OutputSpec requires path and language."""
-    spec = OutputSpec(path="pyproject.toml", language="toml")
+    """A full-file output requires path and language.
+
+    §C8: ``OutputSpec`` is now a discriminated union alias, not a class.
+    Construct the union member; validate the alias with a ``TypeAdapter``.
+    """
+    from templateer.models import FullFileOutput
+
+    spec = FullFileOutput(path="pyproject.toml", language="toml")
     assert spec.path == "pyproject.toml"
     assert spec.language == "toml"
+    assert spec.kind == "full_file"
+
+
+def test_output_spec_alias_validates_through_a_type_adapter() -> None:
+    """§C8: ``TypeAdapter(OutputSpec)`` is the way to validate raw metadata."""
+    from templateer.models import FullFileOutput
+
+    spec = TypeAdapter(OutputSpec).validate_python(
+        {"path": "pyproject.toml", "language": "toml"}
+    )
+    assert isinstance(spec, FullFileOutput)
+    assert spec.kind == "full_file"
 
 
 def test_prompt_ref_accepts_file() -> None:
