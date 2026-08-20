@@ -2,6 +2,15 @@
 # A1 + A3 -- a valid model produces a type-corrupted artifact, and every
 # layer reports success: render, output validation, and `templateer check`.
 #
+# NOW GUARDS (round-2 remediation):
+#   A1 lint  -> tests/test_audit.py::test_lint_flags_an_unquoted_interpolation_site
+#   A1 check -> tests/test_round_trip.py::test_yaml_str_field_reaching_artifact_as_bool_is_reported
+#   A3       -> tests/test_audit.py::test_audit_flags_a_vulnerable_template
+#
+# check_round_trip needs the model to compare the artifact against, so the
+# validate_artifact call below passes model_data.  Without it the API cannot
+# know what type the schema declared.
+#
 # Run from the repo root:  bash .scratch/projects/06-adversarial-review/probes/p_audit_blind.sh
 set -u
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
@@ -47,10 +56,12 @@ echo "--- what the consumer actually parses ---"
 import json, sys, yaml
 from templateer.api import TemplateRegistry
 r = TemplateRegistry.from_paths(["templates"])
-out = r.render_from_model("yamlvuln", json.load(open("corrupt.json")))
+model_data = json.load(open("corrupt.json"))
+out = r.render_from_model("yamlvuln", model_data)
 print("  artifact          :", repr(out))
 print("  yaml.safe_load    :", yaml.safe_load(out))
 print("  validate_artifact :", r.validate_artifact("yamlvuln", out))
+print("  ... with model    :", r.validate_artifact("yamlvuln", out, model_data))
 print()
 print("  schema declared title: str, owner: str")
 print("  artifact carries      title: bool, owner: None")

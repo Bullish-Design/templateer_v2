@@ -114,7 +114,9 @@ def test_render_json_is_a_single_object(
     )
     payload = _json_object(result)
     assert result.exit_code == 0, result.stderr
-    assert 'name = "hi"' in json.dumps(payload)
+    # Assert against the field, not a re-serialization: json.dumps escapes the
+    # artifact's own quotes, so `name = "hi"` never appears in the dumped text.
+    assert 'name = "hi"' in payload["artifact"]
 
 
 @pytest.mark.finding_a7

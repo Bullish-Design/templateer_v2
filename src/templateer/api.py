@@ -4,6 +4,10 @@ Provides a clean, typed Python interface for discovering and using
 Templateer templates, suitable for embedding in other Python programs,
 scripts, and agent frameworks.
 
+Agent frameworks run an event loop.  ``generate_async`` is therefore the
+primary entry point, and ``generate`` is a thin wrapper for callers that own
+the thread.  Inside a running loop, call ``generate_async``.
+
 Usage:
     registry = TemplateRegistry.from_paths(["./templates"])
 
@@ -11,7 +15,8 @@ Usage:
     for t in registry.list_templates():
         print(t.name, t.description)
 
-    # Generate an artifact (requires LLM)
+    # Generate an artifact (requires LLM).  From async code, await
+    # registry.generate_async(...) with the same arguments.
     result = registry.generate(
         template_name="pyproject-uv",
         user_request="Create a pyproject.toml for a FastAPI app using uv.",
@@ -23,24 +28,38 @@ Usage:
         print(result.artifact)
 
     # Render from an existing model dict (LLM-free)
+    model_data = {"project_name": "my-app", "python_version": "3.12"}
     rendered = registry.render_from_model(
         template_name="pyproject-uv",
-        model_data={"project_name": "my-app", "python_version": "3.12"},
+        model_data=model_data,
     )
 
-    # Validate an artifact
-    errors = registry.validate_artifact("pyproject-uv", rendered)
+    # Validate an artifact.  Pass the model data to also check that the
+    # artifact carries every field with its declared type.
+    errors, warnings = registry.validate_artifact(
+        "pyproject-uv", rendered, model_data=model_data
+    )
+
+    # Audit a template for injection and unquoted-site holes
+    report = registry.audit("pyproject-uv")
+    print(report.ok, report.findings)
 """
 
+import asyncio
 from pathlib import Path
 from typing import Any
 
+from templateer.audit import AuditReport, audit_template
 from templateer.catalog import TemplateCatalog
 from templateer.generator import DEFAULT_MODEL
-from templateer.pipeline import generate
+from templateer.pipeline import generate_async as pipeline_generate_async
 from templateer.result import GenerationRequest, GenerationResult
 from templateer.template import Template
-from templateer.validators import effective_validators, validate_output
+from templateer.validators import (
+    check_round_trip,
+    effective_validators,
+    validate_output,
+)
 
 
 class TemplateRegistry:
@@ -139,7 +158,7 @@ class TemplateRegistry:
     # Generation (LLM required)
     # ------------------------------------------------------------------
 
-    def generate(
+    async def generate_async(
         self,
         template_name: str,
         user_request: str,
@@ -149,12 +168,37 @@ class TemplateRegistry:
     ) -> GenerationResult:
         """Generate an artifact (full pipeline with LLM).
 
-        Returns a GenerationResult rather than raising: LLM failure is an expected
-        outcome, not an exceptional one.  Check ``result.succeeded``.
+        This is the primary entry point.  Agent frameworks — pydantic-ai,
+        LangGraph, the Claude Agent SDK — run an event loop, and the
+        synchronous wrapper cannot run inside one.
+
+        Returns a GenerationResult rather than raising: LLM failure is an
+        expected outcome, not an exceptional one.  Check ``result.succeeded``.
         """
-        return generate(self._catalog, GenerationRequest(
+        return await pipeline_generate_async(self._catalog, GenerationRequest(
             template_name=template_name, user_request=user_request,
             context=context or {}, model_name=model_name, max_attempts=max_attempts,
+        ))
+
+    def generate(
+        self,
+        template_name: str,
+        user_request: str,
+        context: dict[str, Any] | None = None,
+        model_name: str = DEFAULT_MODEL,
+        max_attempts: int = 3,
+    ) -> GenerationResult:
+        """Run :meth:`generate_async` on a new event loop.
+
+        Use this from synchronous code that owns the thread.  Inside a
+        running event loop ``asyncio.run`` raises ``RuntimeError``; await
+        :meth:`generate_async` there instead.
+
+        The arguments and the return value match :meth:`generate_async`.
+        """
+        return asyncio.run(self.generate_async(
+            template_name=template_name, user_request=user_request,
+            context=context, model_name=model_name, max_attempts=max_attempts,
         ))
 
     # ------------------------------------------------------------------
@@ -184,11 +228,13 @@ class TemplateRegistry:
         Raises:
             TemplateNotFoundError: If the named template is not found.
             pydantic.ValidationError: If *model_data* fails schema validation.
+                A non-mapping argument fails the same way, because the CLI
+                and this method both use ``model_validate`` (§B8).
             RenderError: If the template rendering step fails.
         """
         template = self._catalog.get(template_name)
         schema_class = template.get_schema_class()
-        model = schema_class(**model_data)
+        model = schema_class.model_validate(model_data)
         return template.render(model)
 
     # ------------------------------------------------------------------
@@ -199,31 +245,77 @@ class TemplateRegistry:
         self,
         template_name: str,
         artifact: str,
-    ) -> list[str]:
+        model_data: dict[str, Any] | None = None,
+    ) -> tuple[list[str], list[str]]:
         """Validate a rendered artifact against the template's output validators.
 
         Runs the built-in parser validator for the template's target
         language plus any custom validators declared in the template's
         ``metadata.yml``.
 
+        Warnings reach the caller.  This method used to drop them, which made
+        a failing ``optional: true`` validator invisible through the Python
+        API (§B8).
+
+        Give *model_data* to also run the round-trip check.  A parser only
+        proves that the artifact is well formed.  The round-trip check proves
+        that the artifact carries each field with the type the schema
+        declares — it catches a ``str`` field that reaches the artifact as a
+        bool, which every other layer reports as success (§A1).
+
         Args:
             template_name: Exact template directory name.
             artifact: The artifact text to validate.
+            model_data: Optional dict matching the template's Pydantic
+                schema.  It is validated against the schema first, so the
+                round-trip check reads the model's values, not raw input.
 
         Returns:
-            A list of error messages.  An empty list means the artifact
-            passed all validators.
+            ``(errors, warnings)``.  Two empty lists mean the artifact passed
+            every check.  Errors are fatal; warnings come from validators
+            declared ``optional: true``.
 
         Raises:
             TemplateNotFoundError: If the named template is not found.
+            pydantic.ValidationError: If *model_data* fails schema validation.
         """
         template = self._catalog.get(template_name)
-        errors, _ = validate_output(
+        errors, warnings = validate_output(
             artifact,
             template.output_language,
             effective_validators(template.metadata.output, template.metadata.validators),
         )
-        return errors
+        if model_data is not None:
+            model = template.get_schema_class().model_validate(model_data)
+            errors = [
+                *errors,
+                *check_round_trip(
+                    artifact, template.output_language, model.model_dump(mode="json")
+                ),
+            ]
+        return errors, warnings
+
+    # ------------------------------------------------------------------
+    # Template audit
+    # ------------------------------------------------------------------
+
+    def audit(self, template_name: str) -> AuditReport:
+        """Audit a template for injection and unquoted-site holes.
+
+        This is the Python equivalent of ``templateer check``.  The report
+        says what the audit did, not only what it found: read
+        ``report.audited`` before you read ``report.findings``.
+
+        Args:
+            template_name: Exact template directory name.
+
+        Returns:
+            An :class:`AuditReport`.
+
+        Raises:
+            TemplateNotFoundError: If the named template is not found.
+        """
+        return audit_template(self._catalog.get(template_name))
 
     # ------------------------------------------------------------------
     # Introspection
