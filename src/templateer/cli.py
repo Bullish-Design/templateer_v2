@@ -71,6 +71,7 @@ EXIT_CODES: dict[FailureReason, int] = {
     FailureReason.OUTPUT_VALIDATION_FAILED: EXIT_FINDING,
     FailureReason.CONFIG_ERROR: EXIT_CONFIG,
     FailureReason.LLM_FAILED: EXIT_CONFIG,
+    FailureReason.INTERNAL_ERROR: EXIT_CONFIG,
     FailureReason.NO_TEMPLATE: EXIT_USAGE,
 }
 """Exit code per failure reason.  The machine-readable form of the table."""
@@ -595,7 +596,11 @@ def generate_artifact(
             result.model_dump(),
             as_json,
             [
-                f"Generation failed: {reason.value}",
+                (
+                    "Generation failed: internal error"
+                    if reason is FailureReason.INTERNAL_ERROR
+                    else f"Generation failed: {reason.value}"
+                ),
                 *([result.error_detail] if result.error_detail else []),
             ],
             EXIT_CODES[reason],

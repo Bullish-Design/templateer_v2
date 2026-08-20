@@ -5,7 +5,9 @@ rendering → output validation.  LLM-call tests are skipped unless
 OPENAI_API_KEY is set.
 """
 
+import asyncio
 import json
+import logging
 import os
 from pathlib import Path
 from unittest.mock import patch
@@ -140,6 +142,7 @@ class TestFailureReason:
             FailureReason.RENDER_FAILED,
             FailureReason.OUTPUT_VALIDATION_FAILED,
             FailureReason.LLM_FAILED,
+            FailureReason.INTERNAL_ERROR,
         }
         assert reasons == expected
 
@@ -148,6 +151,7 @@ class TestFailureReason:
         assert FailureReason.RENDER_FAILED == "render_failed"
         assert FailureReason.OUTPUT_VALIDATION_FAILED == "output_validation_failed"
         assert FailureReason.CONFIG_ERROR == "config_error"
+        assert FailureReason.INTERNAL_ERROR == "internal_error"
 
 
 # ---------------------------------------------------------------------------
@@ -172,6 +176,42 @@ class TestRetryBehavior:
             template_name="pyproject-uv", user_request="x", max_attempts=5))
         assert result.failure_reason is FailureReason.CONFIG_ERROR
         assert result.attempt == 1
+
+    def test_internal_error_is_permanent_and_keeps_debug_traceback(
+        self, catalog: TemplateCatalog, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """An unforeseen exception is distinct, terminal, and diagnosable."""
+        request = GenerationRequest(
+            template_name="pyproject-uv", user_request="x", max_attempts=5
+        )
+        caplog.set_level(logging.DEBUG, logger="templateer.pipeline")
+
+        async def generate_valid(template, **kwargs):
+            data = json.loads(
+                Path("templates/pyproject-uv/examples/fastapi.input.json").read_text()
+            )
+            return template.get_schema_class().model_validate(data), None
+
+        with patch(
+            "templateer.pipeline.generate_model_async",
+            side_effect=generate_valid,
+        ):
+            with patch(
+                "templateer.template.Template.render",
+                side_effect=RuntimeError("unforeseen boom"),
+            ):
+                sync_result = generate(catalog, request)
+
+                from templateer.pipeline import generate_async
+
+                async_result = asyncio.run(generate_async(catalog, request))
+
+        for result in (sync_result, async_result):
+            assert result.failure_reason is FailureReason.INTERNAL_ERROR
+            assert result.error_detail == "RuntimeError: unforeseen boom"
+            assert result.attempt == 1
+            assert result.can_retry is False
+        assert any(record.exc_info is not None for record in caplog.records)
 
     def test_retryable_failure_retries_up_to_max(self, catalog: TemplateCatalog) -> None:
         """LLM_FAILED is retried until max_attempts is reached.

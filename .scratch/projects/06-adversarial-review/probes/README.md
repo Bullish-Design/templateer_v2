@@ -24,7 +24,7 @@ Check `git status` after it runs.
 | `p_escaping_holes.py` | A1, B4 | Strings re-lex as other scalar types. Containers render as Python repr. | The scalar reproduction remains visible. Container interpolation raises `EscapeError`. |
 | `p_audit_blind.sh` | A1, A3 | `check` exits 0. Render and validation accept type changes. | `check` exits 1 with four findings. Render exits 1. Validation with model data reports both type changes. |
 | `p_audit_vacuous.sh` | A2, A3 | Both cases report a passing audit after zero probes. | No fixtures reports “nothing audited” and exits 1. `language: nix` fails to load and exits 3. |
-| `mutate.sh` | A1, A3, A5, B1, B4 | The audit mutant leaves 257 tests green. | All eight safety-control mutants turn the 441-test suite red. |
+| `mutate.sh` | A1, A3, A5, B1, B4 | The audit mutant leaves 257 tests green. | All nine safety-control mutants turn the 444-test suite red. |
 | `escape_chars.py` | B1 | 34 codepoints break YAML or Python. | 0 codepoints break. Two lone surrogates raise `EscapeError`. |
 | `escape_fix.py` | B1 | Current code has 36 broken pairs. The candidate has two TOML failures. | Current and selected candidate have 0 broken pairs. Both reject two lone surrogates. |
 | `fuzz_escape.py` | B1 | 1,236 of 16,000 language cases fail. | 0 language cases fail. The escaper rejects 437 inputs that contain lone surrogates. |
@@ -37,16 +37,17 @@ Check `git status` after it runs.
 The current mutation run produces this table:
 
 ```text
-(unmutated)                                    441 passed, 9 skipped
-audit_template -> clean report                 31 failed, 410 passed, 9 skipped
-schema field discovery -> fixture-shaped        4 failed, 437 passed, 9 skipped
-lint_template_source -> no findings             5 failed, 436 passed, 9 skipped
-check_round_trip -> no findings                 7 failed, 434 passed, 9 skipped
-effective_validators -> declared only           5 failed, 436 passed, 9 skipped
-validate_region_payload -> no errors            16 failed, 425 passed, 9 skipped
-escape_string -> bare json.dumps                 9 failed, 432 passed, 9 skipped
-finalizer -> containers pass through           24 failed, 417 passed, 9 skipped
-(unmutated, restored)                          441 passed, 9 skipped
+(unmutated)                                    444 passed, 9 skipped
+audit_template -> clean report                 31 failed, 413 passed, 9 skipped
+schema field discovery -> fixture-shaped        4 failed, 440 passed, 9 skipped
+internal error -> render failed                 3 failed, 441 passed, 9 skipped
+lint_template_source -> no findings             5 failed, 439 passed, 9 skipped
+check_round_trip -> no findings                 7 failed, 437 passed, 9 skipped
+effective_validators -> declared only           5 failed, 439 passed, 9 skipped
+validate_region_payload -> no errors            16 failed, 428 passed, 9 skipped
+escape_string -> bare json.dumps                 9 failed, 435 passed, 9 skipped
+finalizer -> containers pass through           24 failed, 420 passed, 9 skipped
+(unmutated, restored)                          444 passed, 9 skipped
 ```
 
 Each mutant remains valid Python. A syntax error does not count as negative

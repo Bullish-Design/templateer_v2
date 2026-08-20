@@ -124,6 +124,22 @@ Exit codes are part of the CLI contract.
 `list` reports broken templates without hiding them. Add `--strict` to make a
 template load error exit with code 2.
 
+Generation failures use this exact reason and exit-code table:
+
+| Failure reason | Retryable | Exit code |
+|---|---:|---:|
+| `model_validation_failed` | Yes | `1` |
+| `render_failed` | No | `1` |
+| `output_validation_failed` | Yes | `1` |
+| `config_error` | No | `2` |
+| `llm_failed` | Yes | `2` |
+| `internal_error` | No | `2` |
+| `no_template` | No | `3` |
+
+`internal_error` identifies an unforeseen implementation failure. Normal CLI
+output reports the failure without a traceback. Debug logging retains the
+traceback for diagnosis.
+
 ## Python API
 
 The top-level package exports `TemplateRegistry`, `GenerationRequest`,

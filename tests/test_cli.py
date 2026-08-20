@@ -55,6 +55,7 @@ def test_exit_code_map_matches_the_contract() -> None:
         FailureReason.OUTPUT_VALIDATION_FAILED: 1,
         FailureReason.CONFIG_ERROR: 2,
         FailureReason.LLM_FAILED: 2,
+        FailureReason.INTERNAL_ERROR: 2,
         FailureReason.NO_TEMPLATE: 3,
     }
 

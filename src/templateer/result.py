@@ -32,6 +32,9 @@ class FailureReason(str, Enum):
     RENDER_FAILED = "render_failed"
     """The Jinja render step failed — schema/template drift, or a bad value."""
 
+    INTERNAL_ERROR = "internal_error"
+    """An unforeseen implementation failure reached the pipeline boundary."""
+
     OUTPUT_VALIDATION_FAILED = "output_validation_failed"
     """The rendered artifact failed output validation."""
 

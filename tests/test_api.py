@@ -4,6 +4,7 @@ Covers discovery, rendering, validation, and error handling.
 LLM-dependent tests are skipped unless OPENAI_API_KEY is set.
 """
 
+import asyncio
 import json
 import os
 from pathlib import Path
@@ -13,7 +14,7 @@ import pytest
 from pydantic import ValidationError
 
 from templateer.api import TemplateRegistry
-from templateer.result import GenerationResult
+from templateer.result import FailureReason, GenerationResult
 from templateer.template import TemplateNotFoundError
 
 # ---------------------------------------------------------------------------
@@ -438,3 +439,32 @@ class TestIntegration:
         assert [(item.field, item.reason) for item in report.fields_skipped] == [
             ("project_type", "all language audit payloads violate schema constraints")
         ]
+
+    def test_internal_failure_agrees_across_sync_and_async_generation(
+        self,
+        registry: TemplateRegistry,
+        fastapi_input: dict,
+    ) -> None:
+        """Both public generation forms preserve the internal reason."""
+
+        async def generate_valid(template, **kwargs):
+            return template.get_schema_class().model_validate(fastapi_input), None
+
+        with patch(
+            "templateer.pipeline.generate_model_async", side_effect=generate_valid
+        ):
+            with patch(
+                "templateer.template.Template.render",
+                side_effect=RuntimeError("unforeseen API failure"),
+            ):
+                sync_result = registry.generate(
+                    "pyproject-uv", "x", max_attempts=3
+                )
+                async_result = asyncio.run(
+                    registry.generate_async("pyproject-uv", "x", max_attempts=3)
+                )
+
+        assert sync_result.failure_reason is FailureReason.INTERNAL_ERROR
+        assert async_result.failure_reason is FailureReason.INTERNAL_ERROR
+        assert sync_result.error_detail == async_result.error_detail
+        assert sync_result.attempt == async_result.attempt == 1

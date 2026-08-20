@@ -80,6 +80,12 @@ mutate src/templateer/audit.py \
   '    if data is _MISSING or data is None or data == []:
         return []  # MUTANT'
 
+# --- unforeseen failures keep a distinct infrastructure classification -----
+mutate src/templateer/pipeline.py \
+  '            request, attempt, FailureReason.INTERNAL_ERROR,' \
+  'internal error -> render failed' \
+  '            request, attempt, FailureReason.RENDER_FAILED,  # MUTANT'
+
 # --- the authoring lint, new in this round (A1 lint half) ------------------
 mutate src/templateer/audit.py \
   '    language = template.metadata.output.language

@@ -36,6 +36,7 @@ EXPECTED_EXIT_CODES: dict[FailureReason, int] = {
     FailureReason.OUTPUT_VALIDATION_FAILED: 1,
     FailureReason.CONFIG_ERROR: 2,
     FailureReason.LLM_FAILED: 2,
+    FailureReason.INTERNAL_ERROR: 2,
     FailureReason.NO_TEMPLATE: 3,
 }
 
@@ -401,6 +402,43 @@ def test_llm_failure_exits_two(
     payload = _json_object(result)
     assert payload["failure_reason"] == FailureReason.LLM_FAILED.value
     assert result.exit_code == 2
+
+
+def test_internal_failure_is_structured_and_has_no_cli_traceback(
+    runner: CliRunner,
+    good_template: Path,
+    stub_model_generation: Callable[..., list[dict]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An unforeseen pipeline exception is infrastructure, not render drift."""
+    stub_model_generation(
+        lambda template, attempt: template.get_schema_class()(x="hi")
+    )
+    monkeypatch.setattr(
+        "templateer.template.Template.render",
+        lambda self, model: (_ for _ in ()).throw(RuntimeError("unforeseen boom")),
+    )
+    args = [
+        "generate",
+        "okltoml",
+        "-r",
+        "x",
+        "--max-attempts",
+        "5",
+        *_paths(good_template),
+    ]
+
+    structured = runner.invoke(main, [*args, "--json"])
+    payload = _json_object(structured)
+    assert structured.exit_code == 2
+    assert payload["failure_reason"] == "internal_error"
+    assert payload["attempt"] == 1
+    assert "Traceback" not in structured.output
+
+    prose = runner.invoke(main, args)
+    assert prose.exit_code == 2
+    assert "Generation failed: internal error" in prose.output
+    assert "Traceback" not in prose.output
 
 
 @pytest.mark.finding_a7

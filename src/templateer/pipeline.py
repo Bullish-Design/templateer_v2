@@ -108,7 +108,7 @@ async def _attempt_async(
     except Exception as e:
         logger.debug("pipeline attempt raised", exc_info=True)
         return _fail(
-            request, attempt, FailureReason.RENDER_FAILED,
+            request, attempt, FailureReason.INTERNAL_ERROR,
             f"{type(e).__name__}: {e}", **slot,
         )
 
