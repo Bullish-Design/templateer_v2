@@ -1,11 +1,11 @@
 # Argentic compatibility audit
 
-**Date:** 2026-08-20  
-**Templateer baseline:** `1075ca8`  
-**Argentic baseline:** `dc9f86c`  
-**Initial disposition:** B. Narrow integration gap  
-**Final Argentic integration:** `8d67c9c`  
-**Final documentation pin:** `ade3f09`
+- **Date:** 2026-08-20
+- **Templateer baseline:** `1075ca8`
+- **Argentic baseline:** `dc9f86c`
+- **Initial disposition:** B. Narrow integration gap
+- **Final Argentic integration:** `8d67c9c`
+- **Final documentation pin:** `ade3f09`
 
 ## Scope
 
