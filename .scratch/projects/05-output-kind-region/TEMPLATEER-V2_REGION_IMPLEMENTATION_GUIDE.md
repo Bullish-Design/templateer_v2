@@ -4,7 +4,11 @@
 **Goal:** make "this template writes a bounded region of a page" a *declared, enforceable* property, so the argentic.space consumer can splice payloads without violating P5 (don't write what you don't own).
 **Outcome:** `OutputSpec.kind: Literal["full_file", "region"]` + `RegionBoundary`, a markdown/YAML payload validator, non-optional enforcement in the pipeline, and a back-compatible default of `full_file`.
 
-> **Status:** written *before* implementation. Facts about the current code are **[verified]** (reproduced against this checkout, 223 passed / 9 skipped). Every new code block is the **design target** — confirm it as you land it. The one contract you must pin against the real argentic repo before shipping is the exact fence grammar of `replace_range` (§ Design decisions, D6).
+> **Status:** written *before* implementation. The historical baseline was 223
+> passed and 9 skipped. The implementation and adversarial follow-ups are now
+> complete. Argentic consumes the region result at commit `8d67c9c`. See the
+> [compatibility audit](../06-adversarial-review/ARGENTIC_COMPATIBILITY_AUDIT_2026-08-20.md)
+> for the verified fence and boundary contract.
 
 ---
 
@@ -30,7 +34,9 @@
 ## Design decisions (with the ones the proposal asked you to justify)
 
 ### D1 — The artifact is the fence *body*, not the fenced block
-The page owns the fences; the consumer swaps only the `CodeText` span (the body) via `replace_range`. So a region template's artifact is **bare YAML**. The validator *tolerates* a fenced artifact (for testing the gate), but the contract is body-only: a payload that begins with a fence line must end with a matching fence line, and a stray fence line inside the body is an error.
+The page owns the fences. The consumer swaps only the `CodeText` span through
+`replace_range`. A region template artifact is bare YAML. The validator rejects
+a fenced artifact. It also rejects a YAML document fence.
 
 Consequence: `output.language: yaml` works with the existing renderer finalizer and the built-in YAML parse check.
 
@@ -46,8 +52,16 @@ Per proposal §3: for `kind: "region"`, `output_path = region.page`. Failure rep
 ### D5 — No bundled region template
 Back-compat gate (proposal §4.5) means "every existing template untouched" — adding a bundled template changes the shipped surface and makes the injection audit (which iterates `templates/`) a moving target. Tests build a region template as a `tmp_path` fixture instead. **argentic Phase 6 owns the first real consumer.**
 
-### D6 — The `---` ambiguity is resolved by contract; pin it against argentic
-`---` is simultaneously a YAML document-start marker and (per the concept) the data-block fence. This guide treats a leading fence line as an opener that *requires* a closer; body-only payloads must not include doc-start markers. **Before shipping, pin the exact fence grammar of argentic's `replace_range` against this implementation and adjust `_extract_fenced_body` if it differs** (e.g. `~~~` fences, fence attributes). This is a named report-back item in the proposal §6.
+### D6 — The fence contract is pinned against Argentic
+
+Argentic uses Markdown code fences. Its scanner opener is
+``^\s{0,3}(`{3,}|~{3,})``. A data info string is exactly `data` or starts with
+`#`. The closer uses the same fence character and a run at least as long as the
+opener. `replace_range` receives the indexed body offsets. It does not parse a
+fence.
+
+Templateer rejects Markdown fences and YAML document fences in a region
+artifact. Argentic owns the Markdown fence. The contracts therefore agree.
 
 ### D7 — Payload quality rules
 - Must be **one** YAML document (multi-doc → `ComposerError` → error).
@@ -427,24 +441,21 @@ def effective_validators(
 ```
 
 ```python
-_FENCES = ("```", "---")
-
-
 def validate_region_payload(artifact: str) -> list[str]:
     """Validate *artifact* as the payload of a fenced YAML region block.
 
     Returns a list of errors; empty means the payload is clean.
 
     The consumer swaps the fence *body* (the block's CodeText span) and owns
-    the fences, so the artifact is bare YAML by contract (D1).  A fenced
-    artifact is tolerated for gate testing: a leading fence line must be
-    matched by a trailing fence line, and the body must not contain a fence
-    line.  A payload that begins with ``---`` is therefore treated as a
-    fence opener, never as a YAML document-start marker.
+    the fences, so the artifact is bare YAML by contract. A fenced artifact
+    double-fences the hosting block, so a leading fence line is an error.
+    Empty mappings and lists are errors too.
     """
-    body, fence_errors = _extract_fenced_body(artifact)
+    fence_errors = _check_no_fence(artifact)
     if fence_errors:
         return fence_errors
+
+    body = artifact
 
     # One YAML document ------------------------------------------------
     try:
@@ -457,6 +468,9 @@ def validate_region_payload(artifact: str) -> list[str]:
             f"region payload must be a YAML mapping or list (a data block), "
             f"got {kind}"
         ]
+    if not parsed:
+        kind = "mapping" if isinstance(parsed, dict) else "list"
+        return [f"region payload is an empty {kind}: a generated empty payload is a bug"]
 
     # Round-trip stability ---------------------------------------------
     try:
@@ -470,37 +484,24 @@ def validate_region_payload(artifact: str) -> list[str]:
     return _find_duplicate_keys(body)
 
 
-def _extract_fenced_body(artifact: str) -> tuple[str, list[str]]:
-    """Return ``(body, errors)`` for a possibly-fenced artifact."""
+def _check_no_fence(artifact: str) -> list[str]:
+    """Report a leading fence line."""
     lines = artifact.splitlines()
     if not lines:
-        return "", ["region payload is empty"]
+        return ["region payload is empty"]
 
     first = lines[0].strip()
-    opener: str | None = None
     if first.startswith("```"):
-        opener = "```"  # trailing language tag allowed: ```yaml
+        opener = "```"
     elif first == "---" or first.startswith("--- "):
         opener = "---"
+    else:
+        return []
 
-    if opener is None:
-        return artifact, []  # bare body — the normal case
-
-    if len(lines) < 2:
-        return "", [f"unclosed '{opener}' fence: opener without a closer"]
-    if lines[-1].strip() != opener:
-        return "", [
-            f"unclosed '{opener}' fence: expected closing '{opener}', "
-            f"got {lines[-1].strip()!r}"
-        ]
-
-    body_lines = lines[1:-1]
-    errors: list[str] = []
-    for i, line in enumerate(body_lines, start=2):
-        if line.strip().startswith(opener):
-            errors.append(f"stray fence '{opener}' at line {i}: the body must not "
-                          f"contain a fence line")
-    return "\n".join(body_lines), errors
+    return [
+        f"region payload must not be fenced: line 1 is a '{opener}' fence "
+        f"line, but the page owns the fences and the payload is bare YAML"
+    ]
 
 
 def _find_duplicate_keys(text: str) -> list[str]:
@@ -659,5 +660,8 @@ Do **not** re-add `catalog.templates_by_output_kind` — nothing consumes it (YA
 2. **Final `OutputSpec` shape** — as pinned in Phase 1: `{path, language, kind="full_file", region=None}` + `RegionBoundary{page, ref, anchor=None}`, extra=forbid, coupling enforced by `model_validator`.
 3. **The five gate checks** — each maps to a Phase 0 test class; report pass/fail per check.
 4. **Validator decision** — offline (LocalIndex-equivalent) is the default (D3): static checks in `validators.py`; RuntimeIndex live-checking is argentic's at splice time. Why: no new dependency, offline-first gate, and the page/index only exist on the consumer side.
-5. **Drift vs this doc** — D6 is the big one: confirm `---` vs ``` fence grammar against the *real* argentic `replace_range` before shipping; also confirm `region.page` "name vs pattern" semantics on the argentic side. Everything else in the proposal held against the 0.2.0 code.
+5. **Drift vs this doc** — Argentic uses Markdown backtick or tilde fences. It
+   does not use `---` as a region fence. Argentic treats `region.page` as one
+   exact live page name. It normalizes a leading `$` for `region.ref`. It
+   requires an exact `region.anchor` match.
 6. **Trunk state** — push only when the suite (223 pre-existing + new) is green.

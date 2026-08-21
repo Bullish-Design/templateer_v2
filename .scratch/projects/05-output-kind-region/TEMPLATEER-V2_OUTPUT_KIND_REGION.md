@@ -10,6 +10,11 @@
 > Phase 6 kickoff (`argentic/.scratch/projects/004-argentic-space/
 > PHASE-6-PROMPT.md`), which consumes this. The argentic side is a parallel
 > track; this doc is the templateer side.
+>
+> **Status update, 2026-08-20:** The Templateer region contract is implemented.
+> Argentic consumes it at commit `8d67c9c`. The compatibility evidence is in
+> [`../06-adversarial-review/ARGENTIC_COMPATIBILITY_AUDIT_2026-08-20.md`](../06-adversarial-review/ARGENTIC_COMPATIBILITY_AUDIT_2026-08-20.md).
+> Historical design targets below remain for provenance.
 
 ## 1. The problem, restated against the actual 0.2.0 code
 
