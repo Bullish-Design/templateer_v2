@@ -37,10 +37,9 @@ from typing import Any, NoReturn
 
 import click
 
-from templateer.audit import audit_template
 from templateer.catalog import TemplateCatalog
-from templateer.generator import DEFAULT_MODEL
-from templateer.pipeline import generate
+from templateer.constants import DEFAULT_MODEL
+from templateer.generator import preload
 from templateer.result import FailureReason, GenerationRequest
 from templateer.template import Template, TemplateNotFoundError
 from templateer.validators import (
@@ -553,6 +552,9 @@ def generate_artifact(
     Under ``--json`` the command emits ``GenerationResult.model_dump()``
     verbatim, so the caller reads the structured failure instead of prose.
     """
+    preload()
+    from templateer.pipeline import generate
+
     catalog = _load_catalog(paths)
 
     def die_usage(message: str) -> NoReturn:
@@ -742,6 +744,8 @@ def check_template(template_name: str, paths: tuple[str, ...], as_json: bool) ->
     separate "clean" from "audited nothing" is a false proof, so an audit that
     ran nothing exits 2.
     """
+    from templateer.audit import audit_template
+
     template = _get_template_or_exit(template_name, paths, as_json)
     report = audit_template(template)
     payload = report.model_dump()

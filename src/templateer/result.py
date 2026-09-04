@@ -10,7 +10,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
-from templateer.generator import DEFAULT_MODEL
+from templateer.constants import DEFAULT_MODEL
 from templateer.models import RegionBoundary
 
 

@@ -143,7 +143,11 @@ traceback for diagnosis.
 ## Python API
 
 The top-level package exports `TemplateRegistry`, `GenerationRequest`,
-`GenerationResult`, and `FailureReason`.
+`GenerationResult`, `FailureReason`, and `preload`.
+
+The package keeps the Pydantic AI generation framework out of the import path
+until generation starts. Call `preload()` during application startup when the
+first generation must not pay the import cost.
 
 ### Async generation
 
@@ -165,6 +169,14 @@ if result.succeeded:
     print(result.artifact)
 else:
     print(result.failure_reason, result.error_detail)
+```
+
+To load the generation framework before handling requests:
+
+```python
+from templateer import preload
+
+preload()
 ```
 
 The result can also carry the validated model, warnings, token usage, and the

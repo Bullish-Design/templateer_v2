@@ -45,14 +45,14 @@ Usage:
     print(report.ok, report.findings)
 """
 
+from __future__ import annotations
+
 import asyncio
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from templateer.audit import AuditReport, audit_template
 from templateer.catalog import TemplateCatalog
-from templateer.generator import DEFAULT_MODEL
-from templateer.pipeline import generate_async as pipeline_generate_async
+from templateer.constants import DEFAULT_MODEL
 from templateer.result import GenerationRequest, GenerationResult
 from templateer.template import Template
 from templateer.validators import (
@@ -60,6 +60,9 @@ from templateer.validators import (
     effective_validators,
     validate_output,
 )
+
+if TYPE_CHECKING:
+    from templateer.audit import AuditReport
 
 
 class TemplateRegistry:
@@ -175,6 +178,8 @@ class TemplateRegistry:
         Returns a GenerationResult rather than raising: LLM failure is an
         expected outcome, not an exceptional one.  Check ``result.succeeded``.
         """
+        from templateer.pipeline import generate_async as pipeline_generate_async
+
         return await pipeline_generate_async(self._catalog, GenerationRequest(
             template_name=template_name, user_request=user_request,
             context=context or {}, model_name=model_name, max_attempts=max_attempts,
@@ -315,6 +320,8 @@ class TemplateRegistry:
         Raises:
             TemplateNotFoundError: If the named template is not found.
         """
+        from templateer.audit import audit_template
+
         return audit_template(self._catalog.get(template_name))
 
     # ------------------------------------------------------------------

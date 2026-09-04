@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib.metadata
+import subprocess
 import sys
 import tomllib
 from collections.abc import Callable
@@ -324,6 +325,22 @@ def test_version_is_single_sourced() -> None:
     import templateer
 
     assert templateer.__version__ == importlib.metadata.version("templateer")
+
+
+def test_import_templateer_does_not_import_pydantic_ai() -> None:
+    """Render-only imports must not load the generation framework."""
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import sys; import templateer; print('pydantic_ai' in sys.modules)",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.stdout.strip() == "False"
 
 
 # ---------------------------------------------------------------------------

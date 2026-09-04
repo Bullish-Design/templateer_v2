@@ -18,8 +18,6 @@ import asyncio
 import logging
 from typing import Any
 
-from pydantic_ai.exceptions import UnexpectedModelBehavior, UserError
-
 from templateer.catalog import TemplateCatalog
 from templateer.generator import generate_model_async
 from templateer.renderer import RenderError
@@ -38,6 +36,20 @@ logger = logging.getLogger(__name__)
 # are fixed by the repair loop, which changes the prompt, so waiting there buys
 # nothing.  Patch this to 0 to make a test run without sleeping.
 RETRY_BACKOFF_SECONDS: float = 1.0
+
+UnexpectedModelBehavior: Any = None
+UserError: Any = None
+
+
+def _load_exceptions() -> None:
+    """Load pydantic-ai exception classes without affecting render-only use."""
+    global UnexpectedModelBehavior, UserError
+    if UnexpectedModelBehavior is None or UserError is None:
+        from pydantic_ai.exceptions import UnexpectedModelBehavior as _UnexpectedModelBehavior
+        from pydantic_ai.exceptions import UserError as _UserError
+
+        UnexpectedModelBehavior = _UnexpectedModelBehavior
+        UserError = _UserError
 
 
 def generate(catalog: TemplateCatalog, request: GenerationRequest) -> GenerationResult:
@@ -142,6 +154,8 @@ async def _run_attempt(
     # ``path`` is informational for regions, ``region.page`` is the anchor.
     if region is not None:
         slot["output_path"] = region.page
+
+    await asyncio.to_thread(_load_exceptions)
 
     # 2 — Generate the model ----------------------------------------------
     #

@@ -10,15 +10,31 @@ unreachable from the async frameworks it advertises itself to.  The sync
 wrapper lives in ``pipeline.generate``.
 """
 
+import asyncio
 import json
 from typing import Any, cast
 
 from pydantic import BaseModel
-from pydantic_ai import Agent
 
+from templateer.constants import DEFAULT_MODEL
 from templateer.template import Template
 
-DEFAULT_MODEL = "openai:gpt-4.1-mini"
+Agent: Any = None
+"""``pydantic_ai.Agent``, loaded on first use by :func:`_load_agent`."""
+
+
+def _load_agent() -> None:
+    """Load pydantic-ai's agent class without replacing a test patch."""
+    global Agent
+    if Agent is None:
+        from pydantic_ai import Agent as _Agent
+
+        Agent = _Agent
+
+
+def preload() -> None:
+    """Import the generation stack now, so the first generation does not."""
+    _load_agent()
 
 # Pydantic AI's *internal* budget for re-asking the LLM when its output fails
 # schema validation.  Distinct from GenerationRequest.max_attempts, which
@@ -64,6 +80,7 @@ async def generate_model_async(
     Raises:
         Whatever pydantic-ai raises; the pipeline classifies it.
     """
+    await asyncio.to_thread(_load_agent)
     agent = Agent(
         model_name,
         output_type=template.get_schema_class(),
