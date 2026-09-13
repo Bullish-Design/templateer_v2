@@ -43,12 +43,6 @@
   # owns each implementation; Dagu owns the composition (§6). `uv run` rather
   # than bare names: the venv bin is on the interactive shell's PATH but not on
   # the task runner's PATH (STAGE_7_LOG.md, wave 2b).
-  devman = {
-    enable = true;
-    project = "templateer_v2";
-    groups = [ "base" ];
-  };
-
   tasks = {
     "templateer_v2:lint".exec = "uv run --extra dev ruff check .";
     "templateer_v2:test".exec = "uv run --extra dev pytest";
