@@ -1,3 +1,5 @@
 trunk = "main"
+
+[publish]
 verify = ["bash", "-c", "uv run --extra dev ruff check . && uv run --extra dev pytest"]
 verify_timeout = 1800
