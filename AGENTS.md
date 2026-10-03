@@ -1,8 +1,6 @@
 # AGENTS.md — Templateer project instructions
 
-Read [`.agents/skills/my-ai/SKILL.md`](.agents/skills/my-ai/SKILL.md) first. It
-defines the standing environment, verification, version-control, and writing
-rules. This file defines the Templateer-specific rules.
+This file defines the Templateer-specific rules.
 
 ## What this project is
 
@@ -82,5 +80,5 @@ result as a failed verification.
 `AGENTS.md` is the repository source of truth. `CLAUDE.md` is a symlink to this
 file. Do not replace the symlink with a second copy.
 
-The personal layer owns `.agents/skills/my-ai/SKILL.md`. Change that skill in
-its source repository, then materialize the update here.
+The `.agents/` and `.claude/` links are machine-local and maintained by the
+central Devman link plane.
