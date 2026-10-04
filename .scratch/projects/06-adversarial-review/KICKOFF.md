@@ -12,7 +12,7 @@ You are implementing the fixes from a deep adversarial review of templateer v2.
 
 1. `.scratch/projects/06-adversarial-review/TEMPLATEER-V2_ADVERSARIAL_REVIEW_2.md` — the review. Every finding is labelled (§A1, §B1, …) and every `[verified]` finding has a reproduction.
 2. `.scratch/projects/06-adversarial-review/probes/README.md` — the 10 probes, what each proves, and the exact output recorded on 2026-08-20 at `f3b9193`.
-3. `.agents/skills/my-ai/SKILL.md` — the standing cross-repo law (devenv discipline, exit-code contract, version-control lanes, writing style).
+3. `.agents/skills/gitman/SKILL.md` and `.agents/skills/writing/SKILL.md` — version-control and writing rules.
 
 Run the probes before you change anything. They are your baseline; you need to
 see the bugs with your own eyes before you fix them.
@@ -336,10 +336,10 @@ and then written down as proofs. Do not recreate that.
 
 ## Version control
 
-Follow the standing lane law in `.agents/skills/my-ai/SKILL.md`: one lane per
-wave, verify, save, land into trunk, push. Land automatically when verify
-passes. Stop and ask if verify fails, if a merge conflict appears, or if a
-wave turns out to need a file another wave owns.
+Follow the lane workflow in `.agents/skills/gitman/SKILL.md`: one lane per
+wave, verify, describe, land into trunk, then push. Land when verification
+passes. Stop if verification fails, a merge conflict appears, or a wave needs a
+file another wave owns.
 
 ## Report back
 
