@@ -49,6 +49,18 @@ devenv shell
 uv sync --locked --extra dev
 ```
 
+### Nix package
+
+The flake exports the `templateer` command as `packages.<system>.default`. It builds from a
+pinned nixpkgs with no other module. The overlay `overlays.default` adds `templateer` and
+`minijinja` to the Python package set. nixpkgs has no `minijinja`, so the flake builds it.
+
+```nix
+inputs.templateer.url = "github:Bullish-Design/templateer_v2/v0.4.2";
+```
+
+Run `nix build .#templateer` to build it. The build runs the test suite and `templateer --help`.
+
 ## Quick start
 
 These commands use a template named `my-template` under `./templates`.

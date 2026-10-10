@@ -240,3 +240,7 @@ devenv.local.yaml
 # AGENTS.md and CLAUDE.md stay committed by design.
 .agents
 .loci
+
+# Nix build output links
+result
+result-*
