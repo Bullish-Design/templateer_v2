@@ -7,6 +7,7 @@ Uses Click's CliRunner for integration testing of all commands:
 from __future__ import annotations
 
 import json
+from importlib.metadata import version as installed_version
 from pathlib import Path
 
 import pytest
@@ -645,7 +646,7 @@ class TestHelp:
         """``--version`` shows the version."""
         result = runner.invoke(main, ["--version"])
         assert result.exit_code == 0
-        assert "0.4.0" in result.output
+        assert installed_version("templateer") in result.output
 
     def test_command_help(self, runner: CliRunner) -> None:
         """Each subcommand has its own ``--help``."""

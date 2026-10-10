@@ -1,6 +1,6 @@
 [project]
 name = "templateer"
-version = "0.4.1"
+version = "0.4.2"
 description = "Typed, constrained artifact generation for AI agents"
 requires-python = ">=3.12"
 dependencies = [
