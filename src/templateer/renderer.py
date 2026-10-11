@@ -2,7 +2,8 @@
 
 Two invariants, both enforced here and nowhere else:
   1. The template receives only ``model.model_dump(mode="json")``.
-  2. Every interpolated value is formatted for the target language.
+  2. Every interpolated value is formatted for the target language.  A `nix`
+     template formats through its `nix` filter instead of the finalizer.
 """
 
 from pathlib import Path
@@ -11,6 +12,7 @@ from minijinja import Environment
 from pydantic import BaseModel
 
 from templateer.escaping import make_finalizer
+from templateer.nix_render import nix_attr_path, nix_value
 
 
 class RenderError(Exception):
@@ -41,6 +43,11 @@ def render_template(template_path: Path, model: BaseModel, language: str) -> str
     env.lstrip_blocks = True
     env.undefined_behavior = "strict"        # always; not a per-template knob
     env.finalizer = make_finalizer(language)
+    if language == "nix":
+        # The finalizer passes nix strings unchanged, so these filters do all
+        # the quoting.  The audit lint requires one on every `{{ }}` site.
+        env.add_filter("nix", nix_value)
+        env.add_filter("nix_attr", nix_attr_path)
 
     try:
         return env.render_str(source, **render_context)

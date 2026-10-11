@@ -12,6 +12,10 @@ enforces the authoring rule the 04 refactor guide promised: every `{{ }}` site
 in a structured-language template sits inside a double-quoted span, unless the
 schema proves the value is a non-string scalar.
 
+A `nix` template has no data parser, so the injection probe does not apply.
+Its source lint checks that every `{{ }}` site passes through the `nix` filter.
+Its fixture check renders each example and parses the result with Nix.
+
 Both return findings. `audit_template` wraps them in an `AuditReport`, so a
 caller can tell "audited and clean" from "audited nothing".
 """
@@ -23,12 +27,14 @@ import copy
 import json
 import re
 import tomllib
+from collections.abc import Callable
 from typing import Any
 
 import yaml
 from pydantic import BaseModel, Field
 
 from templateer.template import Template
+from templateer.validators import validate_output
 
 # ---------------------------------------------------------------------------
 # The report
@@ -62,7 +68,11 @@ class AuditReport(BaseModel):
 
     @property
     def audited(self) -> bool:
-        """True when the injection probe ran against at least one fixture."""
+        """True when the audit ran against at least one fixture.
+
+        For a structured language the audit is the injection probe.  For
+        `nix` it is the render-and-parse check of each fixture.
+        """
         return self.skipped_reason is None
 
     @property
@@ -535,10 +545,131 @@ def _site_verdict(
     return f"'{expression}' has type {named}, which needs double quotes"
 
 
+
+# ---------------------------------------------------------------------------
+# The nix source lint
+# ---------------------------------------------------------------------------
+
+# A `nix` template gets no finalizer escaping, so a `{{ }}` site that skips the
+# `nix` filter writes raw text into Nix source.  The rule: the last filter of
+# every site is `nix` (any value) or `nix_attr` (an attribute-path segment).
+# `indent` may follow, because it only moves whitespace.
+_NIX_FILTERS = frozenset({"nix", "nix_attr"})
+_NIX_TRAILING_FILTERS = frozenset({"indent"})
+
+_INTERPOLATION = re.compile(r"\{\{.*?\}\}", re.DOTALL)
+_MASKED = re.compile(
+    r"\{#.*?#\}|\{%-?\s*raw\s*-?%\}.*?\{%-?\s*endraw\s*-?%\}", re.DOTALL
+)
+_FILTER_HEAD = re.compile(r"\s*([A-Za-z_]\w*)\s*(.*)\Z", re.DOTALL)
+
+# Operators that bind looser than a filter: `a ~ b | nix` filters only `b`.
+_LOOSE_OPERATOR = re.compile(r"[~+*/%<>=!]|\b(?:if|and|or|not|in|is)\b")
+
+
+def _blank(match: re.Match[str]) -> str:
+    """Replace masked text by spaces, keeping newlines for line numbers."""
+    return re.sub(r"[^\n]", " ", match.group())
+
+
+def _top_level(expression: str) -> tuple[list[str], str]:
+    """Split a Jinja expression at its top-level `|`.
+
+    Returns the pipeline parts and a copy of the first part with string
+    contents and bracketed groups blanked, for the operator check.
+    """
+    parts: list[str] = []
+    current: list[str] = []
+    head: list[str] = []  # the first part, with strings and groups blanked
+    depth = 0
+    quote = ""
+    escaped = False
+    index = 0
+    while index < len(expression):
+        char = expression[index]
+        shown = " "  # what the operator check sees for this character
+        if quote:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == quote:
+                quote = ""
+        elif char in "\"'":
+            quote = char
+        elif char in "([{":
+            depth += 1
+        elif char in ")]}":
+            depth -= 1
+        elif char == "|" and depth == 0 and expression[index + 1 : index + 2] != "|":
+            parts.append("".join(current))
+            current = []
+            index += 1
+            continue
+        elif depth == 0:
+            shown = char
+        if not parts:
+            head.append(shown)
+        current.append(char)
+        index += 1
+    parts.append("".join(current))
+    return parts, "".join(head)
+
+
+def _nix_site_verdict(expression: str) -> str | None:
+    """Return why a `{{ }}` site skips the `nix` filter, or None when it is safe."""
+    expression = expression.strip().strip("-+").strip()
+    if not expression:
+        return "the expression is empty"
+    parts, head = _top_level(expression)
+    if len(parts) == 1:
+        return "the value does not pass through the nix filter"
+    operator = _LOOSE_OPERATOR.search(head)
+    if operator is not None:
+        return (
+            f"the operator '{operator.group()}' binds looser than a filter, so "
+            f"the filter covers only part of the value; wrap the value in parentheses"
+        )
+    names: list[str] = []
+    for part in parts[1:]:
+        found = _FILTER_HEAD.match(part)
+        if found is None:
+            return f"'{part.strip()}' is not a filter name"
+        name, rest = found.group(1), found.group(2).strip()
+        if rest and not (rest.startswith("(") and rest.endswith(")")):
+            return f"unexpected text '{rest}' after the filter '{name}'"
+        names.append(name)
+    while names and names[-1] in _NIX_TRAILING_FILTERS and len(names) > 1:
+        names.pop()
+    if names[-1] not in _NIX_FILTERS:
+        return (
+            f"the last filter is '{names[-1]}'; the site must end with "
+            f"'nix' (or 'nix_attr' for an attribute-path segment)"
+        )
+    return None
+
+
+def _lint_nix_source(source: str, name: str) -> tuple[list[str], int]:
+    """Lint a `nix` template source. Returns (findings, sites examined)."""
+    masked = _MASKED.sub(_blank, source)
+    findings: list[str] = []
+    sites = 0
+    for match in _INTERPOLATION.finditer(masked):
+        sites += 1
+        reason = _nix_site_verdict(match.group()[2:-2])
+        if reason is not None:
+            lineno = source.count("\n", 0, match.start()) + 1
+            tag = " ".join(source[match.start() : match.end()].split())
+            findings.append(
+                f"{name}:{lineno}: interpolation {tag} skips the nix filter: {reason}"
+            )
+    return findings, sites
+
+
 def _lint_source(template: Template) -> tuple[list[str], int]:
     """Run the authoring-rule lint. Returns (findings, sites examined)."""
     language = template.metadata.output.language
-    if language not in STRUCTURED_LANGUAGES:
+    if language != "nix" and language not in STRUCTURED_LANGUAGES:
         return [], 0
 
     try:
@@ -546,6 +677,9 @@ def _lint_source(template: Template) -> tuple[list[str], int]:
         source = source_path.read_text(encoding="utf-8")
     except Exception as e:
         return [f"renderer source unreadable: {e}"], 0
+
+    if language == "nix":
+        return _lint_nix_source(source, template.metadata.renderer.file)
 
     try:
         root = template.get_schema_json()
@@ -596,6 +730,10 @@ def lint_template_source(template: Template) -> list[str]:
     inside a double-quoted span, unless the schema proves the value is an
     integer, a number or a boolean.
 
+    In a `nix` template the rule differs: every site ends with the `nix`
+    filter, or with `nix_attr` for an attribute-path segment.  Quotes in the
+    template text do not matter, because the filter writes its own.
+
     Quote state is tracked per line, left to right. `{{ … }}` and `{% … %}`
     are opaque units, so `"{{ a }}{% if b %}x{% endif %}"` is one quoted span
     and both sites are safe.
@@ -604,6 +742,39 @@ def lint_template_source(template: Template) -> list[str]:
         A list of findings. Empty means the template honours the rule.
     """
     return _lint_source(template)[0]
+
+
+def _audit_nix(
+    template: Template,
+    findings: list[str],
+    sites_linted: int,
+    report: Callable[[int, int, str | None], AuditReport],
+) -> AuditReport:
+    """Render each fixture of a `nix` template and parse it with Nix.
+
+    No injection probe runs: Nix has no data parser to compare skeletons. The
+    source lint and the exhaustive escape test carry that guarantee.
+    """
+    fixtures = sorted((template.root / "examples").glob("*.input.json"))
+    if not fixtures:
+        return report(0, 0, "no examples/ fixtures: no artifact was parsed")
+    try:
+        schema_class = template.get_schema_class()
+    except Exception as e:
+        return report(0, 0, f"schema class unloadable: {e}")
+
+    for fixture in fixtures:
+        try:
+            model = schema_class.model_validate(
+                json.loads(fixture.read_text(encoding="utf-8"))
+            )
+            rendered = template.render(model)
+        except Exception as e:
+            findings.append(f"{fixture.name}: fixture does not render: {e}")
+            continue
+        errors, _ = validate_output(rendered, "nix")
+        findings.extend(f"{fixture.name}: {error}" for error in errors)
+    return report(len(fixtures), 0, None)
 
 
 # ---------------------------------------------------------------------------
@@ -643,6 +814,9 @@ def audit_template(template: Template) -> AuditReport:
             findings=findings,
             skipped_reason=reason,
         )
+
+    if language == "nix":
+        return _audit_nix(template, findings, sites_linted, report)
 
     if language not in STRUCTURED_LANGUAGES:
         return report(

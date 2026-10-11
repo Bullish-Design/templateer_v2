@@ -181,7 +181,7 @@ def test_audit_of_pyproject_uv_is_ok_and_loud(repo_templates: Path) -> None:
 
 
 @pytest.mark.finding_a2
-@pytest.mark.parametrize("language", ["nix", "tomI", "yml", "Python", "hcl"])
+@pytest.mark.parametrize("language", ["nixx", "Nix", "tomI", "yml", "Python", "hcl"])
 def test_unknown_output_language_fails_at_template_load(
     make_template: Callable[..., Path], language: str
 ) -> None:

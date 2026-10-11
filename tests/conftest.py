@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import itertools
 import json
+import shutil
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -37,6 +38,22 @@ def pytest_configure(config: pytest.Config) -> None:
     config.addinivalue_line(
         "markers", "false_positive_guard: the check must stay silent here"
     )
+    config.addinivalue_line(
+        "markers",
+        "needs_nix: runs nix-instantiate; skipped when it is not on PATH",
+    )
+
+
+def pytest_collection_modifyitems(
+    config: pytest.Config, items: list[pytest.Item]
+) -> None:
+    """Skip ``needs_nix`` tests when ``nix-instantiate`` is missing."""
+    if shutil.which("nix-instantiate") is not None:
+        return
+    skip = pytest.mark.skip(reason="nix-instantiate is not on PATH")
+    for item in items:
+        if "needs_nix" in item.keywords:
+            item.add_marker(skip)
 
 
 @pytest.fixture(autouse=True)

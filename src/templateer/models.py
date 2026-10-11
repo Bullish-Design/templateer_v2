@@ -11,26 +11,34 @@ from pydantic import BaseModel, BeforeValidator, Field
 StructuredLanguage = Literal["toml", "json", "yaml", "python"]
 """A language with a parser, an escape grammar and an audit payload set."""
 
+ParsedLanguage = Literal["nix"]
+"""A language with a parse check and an escape grammar, but no data round trip.
+
+A Nix module is a function, not data, so the round-trip and fixture-injection
+audits do not apply.  The ``nix`` filter owns the escaping.  The source lint
+checks that every interpolation uses the filter.
+"""
+
 UnstructuredLanguage = Literal["markdown", "text"]
 """A language with identity escaping and no parser."""
 
-Language = StructuredLanguage | UnstructuredLanguage
+Language = StructuredLanguage | ParsedLanguage | UnstructuredLanguage
 """Every language a template may declare."""
 
 
 class ParseValidator(BaseModel):
     """A validator that parses the artifact in a target language.
 
-    ``language`` is a ``StructuredLanguage``.  A parse validator only ever
-    runs for the four structured languages; ``validate_output`` skips any
-    other value.  So free text here disabled the exact check the template
+    ``language`` is a ``StructuredLanguage`` or a ``ParsedLanguage``.  A parse
+    validator only ever runs for a language with a parser; ``validate_output``
+    skips any other value.  So free text here disabled the exact check the template
     author asked for.  The closed set makes a typo a load error.
     """
 
     model_config = {"extra": "forbid"}
 
     kind: Literal["parse"]
-    language: StructuredLanguage
+    language: StructuredLanguage | ParsedLanguage
     optional: bool = False
 
 

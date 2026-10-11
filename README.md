@@ -252,6 +252,7 @@ template load error.
 | Group | Allowed values | Behavior |
 |---|---|---|
 | Structured | `toml`, `json`, `yaml`, `python` | Language-aware string escaping, parser validation, source lint, and fixture audit. |
+| Parsed | `nix` | The `nix` filter escapes every value. The parse check runs `nix-instantiate --parse -`. The source lint requires the filter on every `{{ }}` site. No data round trip or injection probe runs. |
 | Unstructured | `markdown`, `text` | Identity string handling and no structural parser or injection audit. |
 
 A `full_file` output can use any language in the table. A `region` output must
@@ -320,6 +321,43 @@ model. Put formatting rules in `template.j2`, not in free-form model fields.
 
 Write `prompt.md` to explain the task. The generation prompt also receives the
 Pydantic schema and one schema-valid example when one is available.
+
+### The `nix` language
+
+A `nix` template gets no escaping from the finalizer. Every `{{ }}` site must
+end with the `nix` filter, or with `nix_attr` for an attribute-path segment.
+The source lint reports any other site. `{% raw %}` blocks and comments are not
+linted.
+
+```jinja
+{ pkgs, lib, ... }:
+{
+  {{ name | nix_attr }}.enable = {{ enable | nix }};
+  packages = {{ packages | nix }};
+}
+```
+
+The `nix` filter renders a JSON value as a Nix expression:
+
+| JSON value | Nix text |
+|---|---|
+| string | double-quoted, with `\`, `"`, `${`, newline, carriage return, and tab escaped |
+| integer, float, boolean | the literal (a negative number in a list gets parentheses) |
+| list | `[ a b ]` |
+| object | `{ "key" = value; }` with every key quoted |
+| `{"$pkg": "a.b", "$output": "bin"}` | `pkgs.a.b.bin` (no output, or `out`, adds nothing) |
+| `{"$path": "./x"}` | `./x` (relative paths only) |
+| `{"$nix": "src"}` | `(src)` (raw Nix; the caller owns its content) |
+| `{"$priority": "default"\|"force"\|n, "value": v}` | `lib.mkDefault v`, `lib.mkForce v`, `lib.mkOverride n v` |
+
+`nix_attr` takes one string, or a list of strings that it joins with dots. It
+writes a bare identifier when it can, and a quoted name otherwise.
+
+`null`, NaN, infinity, an integer beyond 64 bits, U+0000, and a lone surrogate
+raise `EscapeError`. The parse check needs `nix-instantiate` on `PATH`. A
+missing program is an error, not a pass. `--parse` also binds names, so the
+module head must declare `pkgs` and `lib`. `templateer check` renders each
+fixture and parses it. It reports "nothing audited" when no fixture exists.
 
 ### Renderer authoring rule
 
@@ -417,7 +455,8 @@ imports its `schema.py`. A template can also declare command validators.
 
 MiniJinja receives the validated model dump. For structured languages, the
 renderer escapes string content for a double-quoted literal. It rejects lone
-surrogates, null interpolation, and direct container interpolation.
+surrogates, null interpolation, and direct container interpolation. A `nix`
+template escapes through its `nix` filter instead; the lint enforces the filter.
 
 The parser check proves that an artifact has valid syntax. The round-trip check
 adds a type check for model strings. The authoring lint and fixture audit add

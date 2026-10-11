@@ -33,6 +33,7 @@ _BOOLEANS = {
     "toml": ("true", "false"),
     "json": ("true", "false"),
     "yaml": ("true", "false"),
+    "nix": ("true", "false"),
 }
 
 # Codepoints that at least one target language refuses to carry raw.
@@ -90,6 +91,47 @@ def escape_string(value: str) -> str:
         )
     out = json.dumps(value, ensure_ascii=False)[1:-1]
     return _UNSAFE.sub(lambda m: "\\u%04x" % ord(m.group()), out)
+
+
+# Nix double-quoted strings do not share JSON's escape grammar.  Nix has no
+# ``\uXXXX`` escape, so every other character stays raw.  The rules are:
+#   backslash, double quote and ``${`` get a backslash; newline, carriage
+#   return and tab get their two-character escape; U+0000 raises.
+# ``nix`` is not in ``_QUOTED_STRING_LANGUAGES``: the ``nix`` filter in
+# ``templateer.nix_render`` quotes and escapes, and the finalizer must not
+# escape its output a second time.
+_NIX_SPECIAL = re.compile(r'[\\"\n\r\t]|\$\{')
+_NIX_REPLACEMENTS = {
+    "\\": "\\\\",
+    '"': '\\"',
+    "${": "\\${",
+    "\n": "\\n",
+    "\r": "\\r",
+    "\t": "\\t",
+}
+
+
+def escape_nix_string(value: str) -> str:
+    """Escape *value* for use inside a Nix double-quoted string literal.
+
+    Returns the string *content* only.  The caller supplies the quotes.
+
+    Raises:
+        EscapeError: *value* holds U+0000, which a Nix string cannot carry,
+            or a lone surrogate, which no UTF-8 source can carry.
+    """
+    if "\x00" in value:
+        raise EscapeError(
+            "U+0000 in an interpolated value; a Nix string cannot hold it — "
+            "remove it at the source"
+        )
+    found = _SURROGATE.search(value)
+    if found:
+        raise EscapeError(
+            f"lone surrogate U+{ord(found.group()):04X} in an interpolated "
+            f"value; a Nix source file is UTF-8 and cannot carry it"
+        )
+    return _NIX_SPECIAL.sub(lambda m: _NIX_REPLACEMENTS[m.group()], value)
 
 
 def make_finalizer(language: str) -> Callable[[object], object]:

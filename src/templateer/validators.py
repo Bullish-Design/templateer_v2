@@ -166,7 +166,7 @@ def validate_output(
 
     Args:
         artifact: The rendered artifact text.
-        language: Target language (toml, json, yaml, python).
+        language: Target language (toml, json, yaml, python, nix).
         validators: Optional additional validators from template metadata.
 
     Returns:
@@ -182,6 +182,7 @@ def validate_output(
         "json": _validate_json,
         "yaml": _validate_yaml,
         "python": _validate_python,
+        "nix": _validate_nix,
     }
 
     if language in parser_validators:
@@ -461,3 +462,28 @@ def _validate_yaml(text: str) -> None:
 def _validate_python(text: str) -> None:
     """Validate Python by parsing the AST."""
     ast.parse(text)
+
+
+def _validate_nix(text: str) -> None:
+    """Validate Nix by piping the text into ``nix-instantiate --parse -``.
+
+    ``-`` reads standard input (checked on Nix 2.34.7).  The parse also binds
+    variables, so a free name such as ``pkgs`` is an error unless the module
+    head declares it.  A missing ``nix-instantiate`` is an error, not a pass.
+    """
+    # Nix reads a C string: a NUL would end the text early and hide the rest.
+    if "\x00" in text:
+        raise ValueError("artifact holds U+0000, which Nix cannot read")
+    try:
+        result = subprocess.run(
+            ["nix-instantiate", "--parse", "-"],
+            input=text.encode("utf-8"),
+            capture_output=True,
+            timeout=30,
+        )
+    except FileNotFoundError as e:
+        raise RuntimeError("nix-instantiate not found on PATH") from e
+    except subprocess.TimeoutExpired as e:
+        raise RuntimeError("nix-instantiate timed out") from e
+    if result.returncode != 0:
+        raise ValueError(result.stderr.decode("utf-8", "replace").strip())
