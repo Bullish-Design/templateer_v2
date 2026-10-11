@@ -7,6 +7,7 @@ Uses Click's CliRunner for integration testing of all commands:
 from __future__ import annotations
 
 import json
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -14,6 +15,11 @@ from click.testing import CliRunner
 
 from templateer.cli import main
 from templateer.result import FailureReason
+
+# The one origin of the release version: the project metadata.
+PROJECT_VERSION: str = tomllib.loads(
+    (Path(__file__).resolve().parent.parent / "pyproject.toml").read_text(encoding="utf-8")
+)["project"]["version"]
 
 # ---------------------------------------------------------------------------
 # Exit codes (§A7, CONTRACT §9)
@@ -642,10 +648,10 @@ class TestHelp:
         assert "check" in result.output
 
     def test_version_flag(self, runner: CliRunner) -> None:
-        """``--version`` shows the version."""
+        """``--version`` shows the version that pyproject.toml declares."""
         result = runner.invoke(main, ["--version"])
         assert result.exit_code == 0
-        assert "0.4.0" in result.output
+        assert PROJECT_VERSION in result.output
 
     def test_command_help(self, runner: CliRunner) -> None:
         """Each subcommand has its own ``--help``."""
