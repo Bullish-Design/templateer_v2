@@ -1,0 +1,1 @@
+{"curl_bin":"/nix/store/w36yf3psz1zhgabw03hlag8bw0rdfsav-curl-8.20.0-bin","curl_default":"/nix/store/w36yf3psz1zhgabw03hlag8bw0rdfsav-curl-8.20.0-bin","curl_default_is_bin":true,"curl_default_is_out":false,"curl_out":"/nix/store/5ji5924yd02lmva6bmp7k65gfs2696z7-curl-8.20.0","curl_outputName":"bin","git_outputs":["out","doc","debug"],"openssl_outputName":"bin"}

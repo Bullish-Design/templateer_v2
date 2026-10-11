@@ -1,0 +1,12 @@
+# uv 0.12.1. Consumer pins templateer==0.4.1; path source (editable) has version 0.5.0.
+[project]
+name = "pinprobe"
+version = "0"
+requires-python = ">=3.12"
+dependencies = ["templateer==0.4.1"]
+[tool.uv.sources]
+templateer = { path = "../tpl", editable = true }
+--- uv lock (fresh):
+Using CPython 3.13.14 interpreter at: /nix/store/a9zllm7fzwgcwlbr2xz3mbnrxkw2jdy0-python3-3.13.14-env/bin/python3
+Resolved 32 packages in 18ms
+exact pin ==0.4.1 vs editable path at 0.5.0: uv lock resolves, locks 0.5.0 (see above)

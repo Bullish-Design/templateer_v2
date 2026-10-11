@@ -1,0 +1,20 @@
+## history/build-templateer.log
+warning: Git tree '/home/andrew/.local/state/templateer/investigation-08/history/ws-merge' is dirty
+python3.13-templateer> ======================= 613 passed, 72 skipped in 5.64s ========================
+## history/build-v6-templateer.log
+python3.13-templateer> ======================== 445 passed, 9 skipped in 4.79s ========================
+## history/pytest-withnix.log
+warning: Fill in your API keys:
+676 passed, 9 skipped in 10.43s
+## nix-lang/pytest-full.log
+warning: Fill in your API keys:
+676 passed, 9 skipped in 11.25s
+## nix-lang/pytest-needs_nix.log
+warning: Fill in your API keys:
+====================== 63 passed, 622 deselected in 4.33s ======================
+## nix-lang/pytest-nix-no-path.log
+167 passed, 63 skipped in 0.67s
+## history/flake-check.log
+warning: app 'apps.x86_64-linux.default' lacks attribute 'meta'
+all checks passed!
+warning: The check omitted these incompatible systems: aarch64-linux

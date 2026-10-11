@@ -1,0 +1,72 @@
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -14,7 +14,7 @@
+   "pydantic>=2.12.5",
+   "pyjutsu==0.23.0",
+   "pyyaml>=6.0",
+-  "templateer==0.4.2",
++  "templateer>=0.5,<0.6",
+   "tomlkit>=0.13",
+   "typer>=0.12",
+ ]
+@@ -55,7 +55,7 @@
+ 
+ [tool.uv.sources]
+ # Templateer is not on PyPI under this name. Install the pinned release from git.
+-templateer = { git = "https://github.com/Bullish-Design/templateer_v2.git", tag = "v0.4.2" }
++templateer = { git = "https://github.com/Bullish-Design/templateer_v2.git", tag = "v0.5.0" }
+ # pyjutsu is not on PyPI. This release wheel needs Linux x86-64 with glibc 2.39 or later.
+ # Other platforms build the sdist from the same release with Rust 1.89 or later.
+ pyjutsu = { url = "https://github.com/Bullish-Design/Pyjutsu/releases/download/v0.23.0/pyjutsu-0.23.0-cp313-abi3-manylinux_2_39_x86_64.whl" }
+--- a/flake.nix
++++ b/flake.nix
+@@ -21,7 +21,7 @@
+     };
+ 
+     templateer = {
+-      url = "git+https://github.com/Bullish-Design/templateer_v2?ref=refs/tags/v0.4.2";
++      url = "git+https://github.com/Bullish-Design/templateer_v2?ref=refs/tags/v0.5.0";
+       inputs.nixpkgs.follows = "nixpkgs";
+     };
+   };
+--- a/README.md
++++ b/README.md
+@@ -23,7 +23,7 @@
+ ## Development
+ 
+ The root devenv pins Python 3.13 and provides jj. `uv sync` installs Templateer
+-0.4.2 from its pinned git tag.
++0.5.0 from its pinned git tag.
+ 
+ ```bash
+ devenv shell
+--- a/packages/templateer.nix
++++ b/packages/templateer.nix
+@@ -13,13 +13,13 @@
+ 
+ buildPythonApplication {
+   pname = "templateer";
+-  version = "0.4.2";
++  version = "0.5.0";
+ 
+   src = fetchFromGitHub {
+     owner = "Bullish-Design";
+     repo = "templateer_v2";
+-    rev = "a342d1e473b406ad141d028c00756bd0bf958d53";
+-    hash = "sha256-H3B3qMlKnko7GMOLupmGZP0/HH+p7Z0dwA2rMHC3bI4=";
++    rev = "<COMMIT-SHA-OF-TAG-v0.5.0>"; # fill in after the tag is pushed
++    hash = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="; # fill in: nix flake prefetch github:Bullish-Design/templateer_v2/v0.5.0
+   };
+   pyproject = true;
+ 
+--- a/docs/user/getting-started.md
++++ b/docs/user/getting-started.md
+@@ -7,7 +7,7 @@
+ ## Requirements
+ 
+ - Python 3.13
+-- Templateer 0.4.2, which `uv sync` installs from its pinned git tag
++- Templateer 0.5.0, which `uv sync` installs from its pinned git tag
+ - jj from the root devenv
+ - devenv in projects that use the workshop test commands
+ 

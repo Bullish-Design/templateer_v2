@@ -1,0 +1,17 @@
+import sys, tempfile, pathlib; sys.path.insert(0, sys.argv[1])
+from pydantic import BaseModel
+from templateer.renderer import render_template
+class M(BaseModel):
+    x: float
+d = pathlib.Path(tempfile.mkdtemp())
+def go(src, x):
+    p = d/"t.j2"; p.write_text(src)
+    try: return render_template(p, M(x=x), "nix")
+    except Exception as e: return f"ERR {type(e).__name__}: {e}"[:140]
+for x in (0.0, 7.0, 7.5):
+    print(x, "| x>1:", go("{{ (x > 1) | nix }}", x), "| x==7:", go("{{ (x == 7) | nix }}", x),
+          "| if x:", go("{% if x %}{{ 1 | nix }}{% else %}{{ 0 | nix }}{% endif %}", x), "| x+1:", go("{{ (x + 1) | nix }}", x))
+from templateer.nix_render import nix_value
+print(nix_value({"$pkg": "curl", "$output": "out"}), nix_value({"$nix": "a"}), nix_value(5e-324))
+try: nix_value(None)
+except Exception as e: print("None:", e)

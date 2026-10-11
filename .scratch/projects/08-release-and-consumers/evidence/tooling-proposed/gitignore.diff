@@ -1,0 +1,10 @@
+--- /home/andrew/.local/state/templateer/investigation-08/tooling/proposed/gitignore.base	2026-10-11 17:38:16.740518268 -0400
++++ /home/andrew/.local/state/templateer/investigation-08/tooling/proposed/gitignore	2026-10-11 17:38:16.779567496 -0400
+@@ -8,7 +8,6 @@
+ .direnv/**
+ #.tmuxp.yaml
+ .python-version
+-devenv.lock
+ .devenv.flake.nix
+ .agents/pi/**
+ .pi/**

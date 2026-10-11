@@ -1,0 +1,11 @@
+--- a/.scratch/projects/16-vendomat-devenv-layer/evidence/step-8a.md
++++ b/.scratch/projects/16-vendomat-devenv-layer/evidence/step-8a.md
+@@ -163,7 +163,7 @@
+   testee.url    = "git+https://github.com/Bullish-Design/testee?ref=refs/tags/v0.5.0";
+   docman.url    = "git+https://github.com/Bullish-Design/docman?ref=refs/tags/v0.3.0";
+   pyjutsu.url   = "git+https://github.com/Bullish-Design/Pyjutsu?ref=refs/tags/v0.23.1";
+-  templateer.url = "git+https://github.com/Bullish-Design/templateer_v2?ref=refs/tags/v0.4.2";
++  templateer.url = "git+https://github.com/Bullish-Design/templateer_v2?ref=refs/tags/v0.5.0";
+   copyroom.url  = "git+https://github.com/Bullish-Design/copyroom?ref=refs/tags/v0.8.1";
+   devman.url    = "git+https://github.com/Bullish-Design/devman?ref=refs/tags/v0.8.0";
+ };

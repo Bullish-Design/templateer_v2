@@ -1,0 +1,61 @@
+Release prep results for Templateer 0.5.0
+Date: 2026-10-12
+Raw logs: ~/.local/state/templateer/investigation-08/release-prep/{stack,docs,consumers,final}/
+
+Stack (change ids are stable; commit ids change when the stack is rewritten)
+  main      kuouuruo  ac02b48c015d  unchanged
+  1         txtnyrvw  this investigation (docs only)
+  2         qzkukvyx  feat: add a flake that builds templateer and the MiniJinja binding
+  3         ommuorol  chore: verify through Testee 0.6.1
+  4         ryvsmxot  docs: record the nix language limits and current module map
+  5         lsrkxkxx  chore: release 0.5.0
+  v6-flake  a342d1e4  unchanged (tag v0.4.2)
+
+Flake commit (step 2)
+  Made with: jj duplicate a342d1e4 --onto main
+  Restored from main: tests/test_cli.py, pyproject.toml, uv.lock (the commit stays at 0.4.1).
+  Added meta to apps.default. The "lacks meta" warning is gone.
+  Added nix to nativeCheckInputs. The build runs all 63 needs_nix tests.
+  nix build .#templateer: 676 passed, 9 skipped (the 9 need OPENAI_API_KEY).
+  The commit body no longer says "Release 0.4.2".
+  .gitignore gains "result" and "result-*".
+
+Testee commit (step 3)
+  Files from evidence/tooling-proposed/, with ${pkgs.nix}/bin on the pytest check PATH.
+  devenv.lock started from the main checkout's ignored lock.
+  "devenv update testee" added only the testee node (tag v0.6.1, rev b5ec947d).
+  testee status: GREEN 3/3.
+  gitman.toml keeps only trunk = "main". gitman 0.12.0 dropped gitman.toml [publish]
+  (gitman CHANGELOG.md, line 35, under "0.12.0 - breaking": "Gitman also dropped
+  `gitman.toml`, the lane model, and the pyjutsu dependency").
+
+Docs-fix commit (step 4)
+  CONTRIBUTING.md module map gains constants.py.
+  README.md "Known limits" for the nix language.
+  Note in 06-adversarial-review that supersedes "Do not add Nix".
+  templates.allium language union includes nix.
+  Note in 06 FOLLOWUPS.md.
+
+Version commit (step 5)
+  pyproject.toml 0.5.0. uv.lock: only the templateer version line changed.
+  README.md flake pin v0.5.0.
+  minijinja 2.22.0 in uv.lock and nix/minijinja.nix.
+  nix build prints "templateer, version 0.5.0".
+  nix flake check passes. nix flake check --all-systems --no-build passes.
+
+Consumer dry run (candidate = main code at 0.5.0; baseline = pinned code)
+  consumer      baseline                candidate
+  devenv-py     731 pass, 2 fail        731 pass, 2 fail
+  copyroom      266 pass, 1 skip        266 pass, 1 skip
+  devman-spike  201 pass, 4 skip        201 pass, 4 skip
+  argentic      173 pass (non-live)     173 pass (non-live)
+  The 2 devenv-py failures are the same on both sides. They are
+  tests/test_options.py::test_hash_is_stable_over_two_runs and
+  ::test_fresh_export_equals_the_committed_export. A secretspec.enable option
+  export diff causes them. Templateer is not involved.
+  devman-spike needs a git repository in the copy. Without one, 2 tests fail on both sides.
+  A parallel copyroom run failed one test on the candidate (a shared /tmp path
+  check). The sequential run passed 266 tests on both sides.
+  argentic live gates did not run.
+  uv 0.12.1 accepts tag = "v0.4.2" for a git source.
+  Pin drafts: consumer-drafts/.

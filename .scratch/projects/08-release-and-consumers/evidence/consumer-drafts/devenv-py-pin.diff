@@ -1,0 +1,13 @@
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -30,8 +30,8 @@
+ [tool.uv.sources]
+ # Git dependencies by HTTPS tag. HTTPS, not SSH: the Nix sandbox and CI have no agent socket.
+ pydantree-sitter = { git = "https://github.com/Bullish-Design/pydantree.git", tag = "v0.4.0", subdirectory = "src/pydantree_sitter" }
+-# Templateer is pinned by revision: the `nix` output language landed on main after v0.4.2.
+-templateer = { git = "https://github.com/Bullish-Design/templateer_v2.git", rev = "ac02b48c015df9e32f93336de8ae2023009b2f07" }
++# Templateer is pinned by tag. v0.5.0 is the first tag with the `nix` output language.
++templateer = { git = "https://github.com/Bullish-Design/templateer_v2.git", tag = "v0.5.0" }
+ loci-core = { git = "https://github.com/Bullish-Design/loci-core.git", tag = "v0.4.5" }
+ # uv does not read the tool.uv.sources of a dependency. loci-core needs mancore from git.
+ mancore = { git = "https://github.com/Bullish-Design/mancore", tag = "v0.1.0" }

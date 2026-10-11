@@ -1,0 +1,9 @@
+README.md         | 12 ++++++++++
+flake.lock        | 27 ++++++++++++++++++++++++
+flake.nix         | 62 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+nix/minijinja.nix | 42 ++++++++++++++++++++++++++++++++++++++
+nix/package.nix   | 63 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+pyproject.toml    |  2 +-
+tests/test_cli.py |  3 +-
+uv.lock           |  2 +-
+8 files changed, 210 insertions(+), 3 deletions(-)

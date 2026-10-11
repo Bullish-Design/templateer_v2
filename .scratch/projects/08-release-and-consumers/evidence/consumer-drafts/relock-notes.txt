@@ -1,0 +1,20 @@
+argentic (main 6c03df79d570): no pyproject change.
+  Source is a path (absolute, editable = false). Version range is templateer>=0.2.
+  After the 0.5.0 tree is checked out at /home/andrew/Documents/Projects/templateer_v2:
+    env -u UV_PROJECT_ENVIRONMENT -u VIRTUAL_ENV uv lock     # templateer 0.4.1 -> 0.5.0 in uv.lock
+    env -u UV_PROJECT_ENVIRONMENT -u VIRTUAL_ENV uv sync
+  Because editable = false, uv builds a wheel from the path. Re-run uv sync after every templateer change.
+
+devman-spike (main 92f19f5bdeeb): no pyproject change.
+  Source is a path (../templateer_v2), unpinned. The committed uv.lock records templateer 0.3.0 (stale).
+  Run uv lock once the sibling tree is at 0.5.0. The lock moves 0.3.0 -> 0.5.0.
+
+copyroom flake.lock (after tag v0.5.0 exists on GitHub):
+  nix flake update templateer        # rewrites ref, rev, narHash, lastModified, revCount
+  (The README and docs/user/getting-started.md lines in copyroom-pin.diff name 0.5.0.)
+
+copyroom packages/templateer.nix rev and hash:
+  git ls-remote https://github.com/Bullish-Design/templateer_v2.git 'refs/tags/v0.5.0^{}' 'refs/tags/v0.5.0'   # use the ^{} line if the tag is annotated
+  nix flake prefetch github:Bullish-Design/templateer_v2/v0.5.0          # prints narHash (sha256-...); equals the fetchFromGitHub hash
+  or: nix-prefetch-github Bullish-Design templateer_v2 --rev v0.5.0
+  Evidence for equality: at v0.4.2 flake.lock narHash and packages/templateer.nix hash are both sha256-H3B3qMlKnko7GMOLupmGZP0/HH+p7Z0dwA2rMHC3bI4=.

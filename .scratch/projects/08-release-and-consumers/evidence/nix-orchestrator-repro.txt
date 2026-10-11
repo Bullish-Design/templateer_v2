@@ -1,0 +1,7 @@
+0.0 | x>1: true | x==7: false | if x: 1 | x+1: ERR RenderError: Failed to render 't.j2': invalid operation: tried to use + operator on unsupported types map and number (in <string>:1)
+---
+7.0 | x>1: true | x==7: false | if x: 1 | x+1: ERR RenderError: Failed to render 't.j2': invalid operation: tried to use + operator on unsupported types map and number (in <string>:1)
+---
+7.5 | x>1: true | x==7: false | if x: 1 | x+1: 8.5
+pkgs.curl (a) 5.0e-324
+None: null value passed to the nix filter; guard the field with {% if field %} ... {% endif %} or give it a default

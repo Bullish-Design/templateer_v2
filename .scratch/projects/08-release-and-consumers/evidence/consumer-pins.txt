@@ -1,0 +1,26 @@
+=== devenv-py
+devenv-py/pyproject.toml:21:  "templateer",
+devenv-py/pyproject.toml:33:# Templateer is pinned by revision: the `nix` output language landed on main after v0.4.2.
+devenv-py/pyproject.toml:34:templateer = { git = "https://github.com/Bullish-Design/templateer_v2.git", rev = "ac02b48c015df9e32f93336de8ae2023009b2f07" }
+=== copyroom
+copyroom/pyproject.toml:4:description = "Mode-aware CLI for local Templateer and jj project workflows."
+copyroom/pyproject.toml:17:  "templateer==0.4.1",
+copyroom/pyproject.toml:57:# CopyRoom uses the maintained local Templateer checkout in this workspace.
+copyroom/pyproject.toml:58:templateer = { path = "../templateer_v2", editable = true }
+=== argentic
+argentic/flake.nix:51:            # two grammar wheels, `templateer` carries pydantic-ai — real
+argentic/pyproject.toml:26:# pattern as eventic. templateer is the fleet templateer_v2 (the region kind),
+argentic/pyproject.toml:39:# The Phase-7 §5.4 write-back seam (TemplateerRenderer) rides behind an
+argentic/pyproject.toml:40:# extra: templateer pulls pydantic-ai + minijinja + pyyaml + click — real
+argentic/pyproject.toml:43:templateer = ["templateer>=0.2"]
+argentic/pyproject.toml:55:# group also installs the local-index and templateer extras so the verification
+argentic/pyproject.toml:57:# templateer acceptance gate) exercises the real extras — a bare `uv sync`
+argentic/pyproject.toml:65:  "argentic[templateer]",
+argentic/pyproject.toml:100:# fleet (not the unrelated PyPI "templateer" 1.0.0 — verified 2026-08-05):
+argentic/pyproject.toml:101:# templateer_v2 @ 971ae4c, the region-kind track.
+argentic/pyproject.toml:102:templateer = { path = "/home/andrew/Documents/Projects/templateer_v2", editable = false }
+=== argentic/consumer
+=== devman-spike
+devman-spike/pyproject.toml:6:# and artifact frontmatter. Templateer also depends on it, but a transitive
+devman-spike/pyproject.toml:8:dependencies = ["pyyaml>=6.0", "templateer", "watchfiles>=1.2.0"]
+devman-spike/pyproject.toml:17:templateer = { path = "../templateer_v2" }

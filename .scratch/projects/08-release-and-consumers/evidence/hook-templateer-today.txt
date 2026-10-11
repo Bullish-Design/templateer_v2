@@ -1,0 +1,36 @@
+# jj state
+ac02b48c015d main fix: keep integral floats as Nix floats in the nix language
+648507a31851  
+70f13f5755c4  docs: update agent instructions
+default: . stlptqky 648507a3 (empty) (no description set)
+inv08-docs: ../gitman-workspaces/inv08-docs txtnyrvw 6842ff3d (empty) (no description set)
+inv08-nixlang: ../../../.local/state/templateer/investigation-08/nix-lang/ws nzzvzpru 2a0b6588 (empty) (no description set)
+retire-agent-instructions-20261003: .worktrees/retire-agent-instructions-20261003 llxwkomu c97b941a (empty) (no description set)
+tpl-nix-float: ../gitman-workspaces/tpl-nix-float owtlsknn e9d9c8b6 (empty) (no description set)
+tpl-nix-language: ../gitman-workspaces/tpl-nix-language ouqprtnk afd8ade5 (empty) (no description set)
+v6-templateer: ../gitman-workspaces/v6-templateer wwrpnmrm 92730a5c (empty) (no description set)
+# hook synthetic: jj git push -b main
+exit=0
+# hook synthetic: git push
+exit=0
+# testee status (repo)
+testee: lock_missing: commit 648507a31851 has no devenv.lock. Run devenv once, then commit devenv.lock.
+exit=2
+# testee --help
+usage: testee [-h] [--root ROOT] [--version]
+              {verify,check,status,show,report,doctor,gc} ...
+
+positional arguments:
+  {verify,check,status,show,report,doctor,gc}
+    verify              run the checks of a commit that have no verdict yet
+    check               deprecated alias of `verify ID...`
+    status              is this commit green? (reads verdicts only)
+    show                show verdicts, failures and log paths
+    report              deprecated alias of `show`
+    doctor              inspect the runner, the repository and the manifest
+    gc                  prune old logs and idle workspaces
+
+options:
+  -h, --help            show this help message and exit
+  --root ROOT           devenv project directory
+  --version             show program's version number and exit

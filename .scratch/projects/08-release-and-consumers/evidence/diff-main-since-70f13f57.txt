@@ -1,0 +1,13 @@
+CONTRIBUTING.md              |   5 +-
+README.md                    |  41 +-
+src/templateer/audit.py      | 178 ++++++++-
+src/templateer/escaping.py   |  42 ++
+src/templateer/models.py     |  18 +-
+src/templateer/nix_render.py | 245 ++++++++++++
+src/templateer/renderer.py   |  13 +-
+src/templateer/validators.py |  28 +-
+tests/conftest.py            |  17 +
+tests/test_audit.py          |   2 +-
+tests/test_cli.py            |  10 +-
+tests/test_nix_language.py   | 859 +++++++++++++++++++++++++++++++++++++++++++++
+12 files changed, 1444 insertions(+), 14 deletions(-)

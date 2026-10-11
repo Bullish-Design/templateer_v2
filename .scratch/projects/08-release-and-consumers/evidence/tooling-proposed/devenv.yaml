@@ -1,0 +1,38 @@
+# yaml-language-server: $schema=https://devenv.sh/devenv.schema.json
+inputs:
+  nixpkgs:
+    url: github:cachix/devenv-nixpkgs/rolling
+  nixpkgs-python:
+    url: github:cachix/nixpkgs-python
+  #nix2container:
+  #  url: github:nlewo/nix2container
+  #mk-shell-bin:
+  #  url: github:rrbutani/nix-mk-shell-bin
+  mypy-agent:
+    url: github:Bullish-Design/mypi-agent?ref=v0.4.0
+    flake: false
+  allium-env:
+    url: github:Bullish-Design/allium-env?ref=v0.3.5
+    flake: false
+
+  # Testee module: declares `testee.checks`. `devenv.lock` pins its revision.
+  # Move the pin with `devenv update testee`, then commit `devenv.lock`.
+  testee:
+    url: "git+https://github.com/Bullish-Design/testee?ref=refs/tags/v0.6.1"
+    flake: false
+
+imports:
+  - allium-env
+  - mypy-agent
+  - testee/nix/testee.nix
+
+# If you're using non-OSS software, you can set allowUnfree to true.
+# allowUnfree: true
+
+# If you're willing to use a package that's vulnerable
+# permittedInsecurePackages:
+#  - "openssl-1.1.1w"
+
+# If you have more than one devenv you can merge them
+#imports:
+# - ./backend

@@ -1,0 +1,13 @@
+Working copy  (@) now at: uqunwmlu 212135d2 (conflict) (empty) scratch: merge test
+Parent commit (@-)      : kuouuruo ac02b48c main | fix: keep integral floats as Nix floats in the nix language
+Parent commit (@-)      : osyruzts a342d1e4 v6-flake | feat: add a flake that builds templateer and the MiniJinja binding
+Added 4 files, modified 4 files, removed 0 files
+Warning: There are unresolved conflicts at these paths:
+tests/test_cli.py    2-sided conflict
+The working copy has no changes.
+Working copy  (@) : uqunwmlu 212135d2 (conflict) (empty) scratch: merge test
+Parent commit (@-): kuouuruo ac02b48c main | fix: keep integral floats as Nix floats in the nix language
+Parent commit (@-): osyruzts a342d1e4 v6-flake | feat: add a flake that builds templateer and the MiniJinja binding
+Warning: There are unresolved conflicts at these paths:
+tests/test_cli.py    2-sided conflict
+tests/test_cli.py    2-sided conflict

@@ -1,0 +1,112 @@
+== d2. float comparison
+x=0.0: {'x': 'T', 'x > 1': 'T', 'x < 1': 'F', 'x >= 7': 'T', 'x == 7': 'F', 'x == 7.0': 'F', 'x > 0': 'T'}
+x=7.0: {'x': 'T', 'x > 1': 'T', 'x < 1': 'F', 'x >= 7': 'T', 'x == 7': 'F', 'x == 7.0': 'F', 'x > 0': 'T'}
+x=-3.0: {'x': 'T', 'x > 1': 'T', 'x < 1': 'F', 'x >= 7': 'T', 'x == 7': 'F', 'x == 7.0': 'F', 'x > 0': 'T'}
+x=2.5: {'x': 'T', 'x > 1': 'T', 'x < 1': 'F', 'x >= 7': 'F', 'x == 7': 'F', 'x == 7.0': 'F', 'x > 0': 'T'}
+x=0.5: {'x': 'T', 'x > 1': 'F', 'x < 1': 'T', 'x >= 7': 'F', 'x == 7': 'F', 'x == 7.0': 'F', 'x > 0': 'T'}
+
+== strings
+'a${b}'                -> "a\${b}"                       parse=OK roundtrip=OK
+'$${x}'                -> "$\${x}"                       parse=OK roundtrip=OK
+"''"                   -> "''"                           parse=OK roundtrip=OK
+"'''x"                 -> "'''x"                         parse=OK roundtrip=OK
+'back\\slash'          -> "back\\slash"                  parse=OK roundtrip=OK
+'line1\nline2'         -> "line1\nline2"                 parse=OK roundtrip=OK
+'tab\t'                -> "tab\t"                        parse=OK roundtrip=OK
+'cr\r\n'               -> "cr\r\n"                       parse=OK roundtrip=OK
+'q"uote'               -> "q\"uote"                      parse=OK roundtrip=OK
+'$'                    -> "$"                            parse=OK roundtrip=OK
+'${'                   -> "\${"                          parse=OK roundtrip=OK
+'a$'                   -> "a$"                           parse=OK roundtrip=OK
+'\\${x}'               -> "\\\${x}"                      parse=OK roundtrip=OK
+'é日本😀'                 -> "é日本😀"                         parse=OK roundtrip=OK
+'\u2028'               -> " "                            parse=OK roundtrip=OK
+'\ufeff'               -> "﻿"                            parse=OK roundtrip=OK
+''                     -> ""                             parse=OK roundtrip=OK
+'a\x00b' -> EscapeError
+'\ud800' -> EscapeError
+
+== nix_attr
+'foo'              -> foo                    {"foo":1}
+'foo-bar'          -> foo-bar                {"foo-bar":1}
+"foo'"             -> foo'                   {"foo'":1}
+'_x'               -> _x                     {"_x":1}
+'1x'               -> "1x"                   {"1x":1}
+'with space'       -> "with space"           {"with space":1}
+'a.b'              -> "a.b"                  {"a.b":1}
+'if'               -> "if"                   {"if":1}
+'or'               -> "or"                   {"or":1}
+'let'              -> "let"                  {"let":1}
+''                 -> ""                     {"":1}
+'a${b}'            -> "a\${b}"               {"a${b}":1}
+'q"'               -> "q\""                  {"q\"":1}
+'é'                -> "é"                    {"é":1}
+'inherit'          -> "inherit"              {"inherit":1}
+'true'             -> true                   {"true":1}
+'null'             -> null                   {"null":1}
+'rec'              -> "rec"                  {"rec":1}
+'services.nginx'   -> "services.nginx"       {"services.nginx":1}
+path: services."my svc"."if"
+1 -> EscapeError an attribute-path segment must be a string, got int
+None -> EscapeError an attribute-path segment must be a string, got NoneType
+[] -> EscapeError an attribute path needs at least one segment
+['a', 1] -> EscapeError an attribute-path segment must be a string, got int
+
+== numbers/containers
+-1                                       -> -1                                            parse=OK eval=-1
+0                                        -> 0                                             parse=OK eval=0
+9223372036854775807                      -> 9223372036854775807                           parse=OK eval=9223372036854775807
+-9223372036854775807                     -> -9223372036854775807                          parse=OK eval=-9223372036854775807
+9223372036854775808                      -> EscapeError: integer 9223372036854775808 is outside the Nix 64-bit literal range
+-9223372036854775808                     -> EscapeError: integer -9223372036854775808 is outside the Nix 64-bit literal range
+1267650600228229401496703205376          -> EscapeError: integer 1267650600228229401496703205376 is outside the Nix 64-bit lite
+True                                     -> true                                          parse=OK eval=true
+False                                    -> false                                         parse=OK eval=false
+1.5                                      -> 1.5                                           parse=OK eval=1.5
+-0.5                                     -> -0.5                                          parse=OK eval=-0.5
+1e+20                                    -> 1.0e+20                                       parse=OK eval=1e+20
+1e-07                                    -> 1.0e-07                                       parse=OK eval=1e-07
+5e-324                                   -> 5.0e-324                                      parse=FAIL ["error: invalid float '5.0e-324'"] eval=FAIL ["error: invalid float '5.0e-324'"]
+1.7976931348623157e+308                  -> 1.7976931348623157e+308                       parse=OK eval=1.7976931348623157e+308
+inf                                      -> EscapeError: float inf has no Nix literal
+nan                                      -> EscapeError: float nan has no Nix literal
+[]                                       -> [ ]                                           parse=OK eval=[]
+{}                                       -> { }                                           parse=OK eval={}
+[[]]                                     -> [ [ ] ]                                       parse=OK eval=[[]]
+[{}]                                     -> [ { } ]                                       parse=OK eval=[{}]
+{'a': {'b': [1, {'c': []}]}}             -> { "a" = { "b" = [ 1 { "c" = [ ]; } ]; }; }    parse=OK eval={"a":{"b":[1,{"c":[]}]}}
+{'': 1}                                  -> { "" = 1; }                                   parse=OK eval={"":1}
+{'a b': 1, '${x}': 2}                    -> { "a b" = 1; "\${x}" = 2; }                   parse=OK eval={"${x}":2,"a b":1}
+[-1, -2.5, True]                         -> [ (-1) (-2.5) true ]                          parse=OK eval=[-1,-2.5,true]
+{'k': -1}                                -> { "k" = -1; }                                 parse=OK eval={"k":-1}
+
+== dict key escapes / tag collisions
+{'$pkg': 'x', 'extra': 1}                     -> EscapeError: $pkg object has unexpected keys: ['extra']
+{'$nix': 'a', 'b': 1}                         -> EscapeError: $nix object has unexpected keys: ['b']
+{'$float': '7.0', 'k': 1}                     -> EscapeError: $float object has unexpected keys: ['k']
+{'$unknown': 1}                               -> { "$unknown" = 1; }
+{'$priority': 'default'}                      -> EscapeError: $priority object needs exactly the keys '$priority' and 'value'
+{'$priority': True, 'value': 1}               -> EscapeError: $priority True must be 'default', 'force' or an integer
+{'$priority': -5, 'value': 1}                 -> lib.mkOverride (-5) 1
+{'$path': './a b'}                            -> EscapeError: $path './a b' is not a safe relative path; use './name' or '../name' w
+{'$path': '/etc/x'}                           -> EscapeError: $path '/etc/x' is not a safe relative path; use './name' or '../name' 
+{'$pkg': 'a..b'}                              -> EscapeError: $pkg 'a..b' has an empty path segment
+{'$pkg': 'a.b-c'}                             -> pkgs.a.b-c
+{'$pkg': 'with'}                              -> pkgs."with"
+{'$pkg': 'a"b'}                               -> pkgs."a\"b"
+
+== $nix comment swallow: FAIL ["error: syntax error, unexpected end of file, expecting ')'"]
+inherit with $nix parens: OK | OK
+with $nix: OK
+select: OK OK
+or-default select: OK
+has attr: OK OK
+$nix with unbalanced: OK
+--- denormal/min normal
+2.2250738585072014e-308 2.2250738585072014e-308 0 
+1e-310 1.0e-310 1 error: invalid float '1.0e-310'
+       at «stdin»:1:1:
+     
+5e-324 5.0e-324 1 error: invalid float '5.0e-324'
+       at «stdin»:1:1:
+     

@@ -1,0 +1,92 @@
+== a. null
+None                                     -> EscapeError: null value passed to the nix filter; guard the field with {% if field %} ... {% endif %} or give it a default
+[None]                                   -> EscapeError: null value passed to the nix filter; guard the field with {% if field %} ... {% endif %} or give it a default
+{'a': None}                              -> EscapeError: null value passed to the nix filter; guard the field with {% if field %} ... {% endif %} or give it a default
+{'$nix':'null'}                          -> (null)
+parse '{ a = (null); }' -> OK
+render: RenderError Failed to render 't.j2': null value passed to the nix filter; guard the field with {% if field %} ... {% endif %} or give it a default
+
+== b. $pkg output
+{'$pkg': 'x'}                            -> pkgs.x
+{'$pkg': 'x', '$output': 'out'}          -> pkgs.x
+{'$pkg': 'x', '$output': 'bin'}          -> pkgs.x.bin
+{'$pkg': 'x.out'}                        -> pkgs.x.out
+{'$pkg': 'x', '$output': None}           -> pkgs.x
+{'$pkg': 'x', '$output': 'lib'}          -> pkgs.x.lib
+nix semantics check (stub derivations):
+pkgs.x.outputName = "bin" ; pkgs.x.out = "OUT"
+real nixpkgs example (needs <nixpkgs> on NIX_PATH):
+{"curl":["bin","dev","out","man","devdoc","debug"],"dflt":"bin","outs":["bin","dev","out","man","doc","debug"]}
+
+
+== c. $nix parentheses
+{'$nix': 'foo'}                          -> (foo)
+{'$nix': '[ a b ]'}                      -> ([ a b ])
+{'$nix': 'null'}                         -> (null)
+{'$nix': 'pkgs.git'}                     -> (pkgs.git)
+{'$nix': 'x: x'}                         -> (x: x)
+{'$nix': 'a // b'}                       -> (a // b)
+-- positions
+attr value                           { a = (foo); }                                     FAIL: error: undefined variable 'foo'
+list                                 { a = [ (foo) (bar) ]; }                           FAIL: error: undefined variable 'foo'
+with                                 { a = with pkgs; [ (git) ]; }                      FAIL: error: undefined variable 'pkgs'
+function head                        { a = (x: x) 1; }                                  OK
+inherit (outer parens)               { inherit (foo) a; }                               FAIL: error: undefined variable 'foo'
+inherit (a) as name                  { inherit (a) b; }                                 FAIL: error: undefined variable 'a'
+attrpath position (paren as name)    { (foo) = 1; }                                     FAIL: error: syntax error, unexpected '(', expecting 'inherit'
+attrpath ${(..)}                     { ${(foo)} = 1; }                                  FAIL: error: undefined variable 'foo'
+inherit name paren                   { inherit (foo); }                                 FAIL: error: undefined variable 'foo'
+import path                          { a = import (./x); }                              OK
+string interp                        { a = "x${(foo)}"; }                               FAIL: error: undefined variable 'foo'
+let binding                          let a = (1); in a                                  OK
+module arg                           { pkgs, ... }: { environment.systemPackages = [ (pkgs.git) ]; } OK
+if cond                              { a = if (true) then (1) else (2); }               OK
+mkIf                                 { lib, ... }: { a = lib.mkIf (cond) (x); }         FAIL: error: undefined variable 'cond'
+function args set                    { pkgs }: pkgs.callPackage (./x) { }               OK
+operator (a // b)                    { a = (a // b); }                                  FAIL: error: undefined variable 'a'
+lambda arg in parens                 { a = (x: x); }                                    OK
+empty parens                         { a = (); }                                        FAIL: error: syntax error, unexpected ')'
+-- eval semantic equality
+(1)                  1 vs 1                    1
+[ (1) ]              [1] vs [ 1 ]                [1]
+({ a = 1; }).a       1 vs { a = 1; }.a         1
+(x: x) 2             2 vs (x: x) 2             2
+(null)               null vs null                 null
+-- $nix with comment/statement that breaks the paren:  FAIL: error: undefined variable 'foo' OK
+-- $nix injection by caller:  (1); evil = (2) -> OK
+
+== d. $float tag limits
+{{ x | nix }}                                           x=7.0 -> 7.0
+{% if x > 1 %}big{% else %}small{% endif %}             x=7.0 -> big
+{{ (x + 1) | nix }}                                     x=7.0 -> RenderError: Failed to render 'f.j2': invalid operation: tried to use + operator on unsupported types map and number (in <string>:1)
+---------------------------------- <string> -----------------------------------
+
+{{ (x * 2) | nix }}                                     x=7.0 -> RenderError: Failed to render 'f.j2': invalid operation: tried to use * operator on unsupported types map and number (in <string>:1)
+---------------------------------- <string> -----------------------------------
+
+{% if x == 7 %}eq{% else %}neq{% endif %}               x=7.0 -> neq
+{% if x %}truthy{% else %}falsy{% endif %}              x=7.0 -> truthy
+{{ x | int | nix }}                                     x=7.0 -> RenderError: Failed to render 'f.j2': invalid operation: cannot convert map to integer (in <string>:1)
+---------------------------------- <string> -----------------------------------
+   1 > {{ x | int | nix }}
+   
+{{ x | abs | nix }}                                     x=7.0 -> RenderError: Failed to render 'f.j2': invalid operation: cannot get absolute value (in <string>:1)
+---------------------------------- <string> -----------------------------------
+   1 > {{ x | abs | nix }}
+     i 
+{{ x | round | nix }}                                   x=7.0 -> RenderError: Failed to render 'f.j2': invalid operation: cannot round value (map) (in <string>:1)
+---------------------------------- <string> -----------------------------------
+   1 > {{ x | round | nix }}
+     i
+{{ x | string }}                                        x=7.0 -> {'$float': '7.0'}
+{{ x ~ 'a' | nix }}                                     x=7.0 -> {'$float': '7.0'}"a"
+{{ (x ~ 'a') | nix }}                                   x=7.0 -> "{'$float': '7.0'}a"
+{{ xs | sum | nix }}                                    x=7.0 -> RenderError: Failed to render 'f.j2': invalid operation: can only sum numbers, got map (in <string>:1)
+---------------------------------- <string> -----------------------------------
+   1 > {{ xs | sum | nix }}
+  
+{{ xs | max | nix }}                                    x=7.0 -> 2.0
+{{ xs | length }}                                       x=7.0 -> 2
+{% for v in xs %}{{ v | nix }} {% endfor %}             x=7.0 -> 1.0 2.0
+x=0.0 `{% if x %}` -> truthy
+x=2.5 `{% if x > 1 %}` -> big

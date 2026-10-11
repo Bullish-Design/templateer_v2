@@ -1,0 +1,16 @@
+## git push origin HEAD
+Testee gate: do not integrate yet. Verify first, integrate only on exit 0.
+git push origin HEAD
+  ref HEAD -> commit 2f5554eb13cd
+  testee status exit 2: testee: lock_missing: commit 2f5554eb13cd has no devenv.lock. Run devenv once, then commit devenv.lock.
+  Fix: run `testee verify -r 2f5554eb13cd` (see the reason code above), then retry.
+exit=2
+## jj git push -b main
+exit=0
+## gh pr create
+Testee gate: do not integrate yet. Verify first, integrate only on exit 0.
+gh pr create
+  PR head master -> commit 2f5554eb13cd
+  testee status exit 2: testee: lock_missing: commit 2f5554eb13cd has no devenv.lock. Run devenv once, then commit devenv.lock.
+  Fix: run `testee verify -r 2f5554eb13cd` (see the reason code above), then retry.
+exit=2
