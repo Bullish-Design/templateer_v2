@@ -12,7 +12,7 @@ from minijinja import Environment
 from pydantic import BaseModel
 
 from templateer.escaping import make_finalizer
-from templateer.nix_render import nix_attr_path, nix_value
+from templateer.nix_render import nix_attr_path, nix_value, tag_integral_floats
 
 
 class RenderError(Exception):
@@ -36,6 +36,10 @@ def render_template(template_path: Path, model: BaseModel, language: str) -> str
         raise RenderError(f"Template file not found: {template_path}")
 
     render_context = model.model_dump(mode="json")
+    if language == "nix":
+        # MiniJinja turns an integral float into an int, and Nix then reads an
+        # int.  Tag each one so the `nix` filter can still write a float.
+        render_context = tag_integral_floats(render_context)
     source = template_path.read_text(encoding="utf-8")
 
     env = Environment()

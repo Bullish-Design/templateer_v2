@@ -5,7 +5,7 @@ strings unchanged, so every ``{{ }}`` site in a ``nix`` template must pass its
 value through the ``nix`` filter (or ``nix_attr`` for an attribute-path
 segment).  The source lint in ``templateer.audit`` enforces that rule.
 
-The value grammar is plain JSON plus four tagged objects:
+The value grammar is plain JSON plus five tagged objects:
 
 =====================================================  ==========================
 Value                                                  Nix text
@@ -20,12 +20,20 @@ Value                                                  Nix text
 ``{"$priority": "default", "value": v}``               ``lib.mkDefault v``
 ``{"$priority": "force", "value": v}``                 ``lib.mkForce v``
 ``{"$priority": 50, "value": v}``                      ``lib.mkOverride 50 v``
+``{"$float": "7.0"}``                                  ``7.0``
 =====================================================  ==========================
 
 A list element or a function argument is an *atom*.  A negative number or a
 priority call in an atom position gets parentheses, because ``[ -1 ]`` and
 ``[ lib.mkForce 1 ]`` do not parse as one element.  ``$nix`` is raw Nix source
 by design: the caller owns its content.
+
+``$float`` is internal.  MiniJinja turns a float with an integer value (``7.0``)
+into an int when a template reads it as a scalar, and Nix then reads ``7``.  The
+renderer calls :func:`tag_integral_floats` for ``nix`` templates.  That function
+replaces each such float with ``{"$float": repr(value)}``, and the ``nix`` filter
+renders the tag as a Nix float.  A template that compares or does arithmetic on
+an integral float sees the tag object, not a number.
 """
 
 from __future__ import annotations
@@ -52,6 +60,7 @@ _KEYWORDS = frozenset(
 # slash, and ``/*`` or ``//`` would start a comment or an operator.
 _PATH = re.compile(r"\.{1,2}(?:/[A-Za-z0-9._+-]+)+\Z|\.{1,2}\Z")
 
+_FLOAT_KEYS = frozenset({"$float"})
 _PKG_KEYS = frozenset({"$pkg", "$output"})
 _PRIORITY_KEYS = frozenset({"$priority", "value"})
 
@@ -91,6 +100,19 @@ def _float_literal(value: float, atom: bool) -> str:
         mantissa, exponent = text.split("e")
         text = f"{mantissa}.0e{exponent}"
     return f"({text})" if text.startswith("-") and atom else text
+
+
+def _render_float(obj: dict[str, Any], atom: bool) -> str:
+    if set(obj) != _FLOAT_KEYS:
+        raise EscapeError(f"$float object has unexpected keys: {sorted(set(obj) - _FLOAT_KEYS)}")
+    text = obj["$float"]
+    if not isinstance(text, str):
+        raise EscapeError("$float must be a string")
+    try:
+        value = float(text)
+    except ValueError:
+        raise EscapeError(f"$float {text!r} is not a float") from None
+    return _float_literal(value, atom)
 
 
 def _render_pkg(obj: dict[str, Any]) -> str:
@@ -154,6 +176,7 @@ def _render_priority(obj: dict[str, Any], atom: bool) -> str:
 
 
 _TAGS: dict[str, Callable[..., str]] = {
+    "$float": _render_float,
     "$pkg": lambda obj, atom: _render_pkg(obj),
     "$path": lambda obj, atom: _render_path(obj),
     "$nix": lambda obj, atom: _render_nix(obj),
@@ -193,6 +216,22 @@ def _render(value: object, atom: bool) -> str:
             pairs.append(f'"{escape_nix_string(key)}" = {_render(item, atom=False)};')
         return "{ " + " ".join(pairs) + " }"
     raise EscapeError(f"cannot render a {type(value).__name__} value as Nix")
+
+
+def tag_integral_floats(value: Any) -> Any:
+    """Return *value* with each integral float replaced by a ``$float`` tag.
+
+    MiniJinja turns ``7.0`` into the int ``7`` when a template reads it as a
+    scalar.  The tag keeps the float type until the ``nix`` filter runs.  Other
+    values, including non-integral and non-finite floats, pass through.
+    """
+    if isinstance(value, float) and math.isfinite(value) and value.is_integer():
+        return {"$float": repr(value)}
+    if isinstance(value, dict):
+        return {key: tag_integral_floats(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [tag_integral_floats(item) for item in value]
+    return value
 
 
 def nix_value(value: object) -> str:

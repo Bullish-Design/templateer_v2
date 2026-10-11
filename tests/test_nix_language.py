@@ -26,7 +26,7 @@ from templateer.escaping import (
     make_finalizer,
 )
 from templateer.models import FullFileOutput, OutputSpec, ParseValidator
-from templateer.nix_render import nix_attr, nix_attr_path, nix_value
+from templateer.nix_render import nix_attr, nix_attr_path, nix_value, tag_integral_floats
 from templateer.renderer import RenderError, render_template
 from templateer.template import Template
 from templateer.validators import STRUCTURED_LANGUAGES, validate_output
@@ -273,6 +273,158 @@ def test_unparenthesised_negative_would_not_parse() -> None:
 @needs_nix
 def test_float_exponent_forms_evaluate() -> None:
     assert nix_eval(nix_value([1e20, 1.5e-07, 2.0, -0.5])) == [1e20, 1.5e-07, 2.0, -0.5]
+
+
+# ---------------------------------------------------------------------------
+# Integral floats keep their type through MiniJinja
+# ---------------------------------------------------------------------------
+
+INTEGRAL_FLOATS = [0.0, 7.0, -125000.0, 1e20]
+
+# Replace every leaf by its Nix type name, so JSON cannot hide int against float.
+LIB_STUB = "lib = { mkForce = x: x; mkDefault = x: x; mkOverride = n: x: x; };\n"
+TYPE_MAP = (
+    "let " + LIB_STUB + "    t = v: if builtins.isList v then map t v\n"
+    "           else if builtins.isAttrs v then builtins.mapAttrs (_: t) v\n"
+    "           else builtins.typeOf v;\n"
+    "in t ("
+)
+
+
+def nix_types(source: str) -> Any:
+    return nix_eval(TYPE_MAP + source + ")")
+
+
+class _FloatModel(BaseModel):
+    x: float
+    xs: list[float]
+    obj: dict[str, Any]
+
+
+def _render_floats(tmp_path: Path, template: str, model: BaseModel) -> str:
+    template_file = tmp_path / "t.j2"
+    template_file.write_text(template, encoding="utf-8")
+    return render_template(template_file, model, "nix")
+
+
+def test_tag_integral_floats_tags_only_integral_floats() -> None:
+    data = {"a": 7.0, "b": [0.0, 2.5, 3, True, "s", None], "c": {"d": -125000.0}}
+    assert tag_integral_floats(data) == {
+        "a": {"$float": "7.0"},
+        "b": [{"$float": "0.0"}, 2.5, 3, True, "s", None],
+        "c": {"d": {"$float": "-125000.0"}},
+    }
+
+
+def test_tag_integral_floats_leaves_non_finite_floats() -> None:
+    inf = float("inf")
+    assert tag_integral_floats([inf]) == [inf]
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [("0.0", "0.0"), ("7.0", "7.0"), ("1e+20", "1.0e+20")],
+)
+def test_float_tag_renders_a_float(text: str, expected: str) -> None:
+    assert nix_value({"$float": text}) == expected
+    assert nix_value([{"$float": text}]) == f"[ {expected} ]"
+
+
+def test_float_tag_negative_in_a_list_gets_parentheses() -> None:
+    assert nix_value([{"$float": "-125000.0"}]) == "[ (-125000.0) ]"
+    assert nix_value({"$float": "-125000.0"}) == "-125000.0"
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        {"$float": 7},
+        {"$float": "seven"},
+        {"$float": "inf"},
+        {"$float": "nan"},
+        {"$float": "7.0", "extra": 1},
+    ],
+)
+def test_float_tag_rejects_bad_values(value: Any) -> None:
+    with pytest.raises(EscapeError):
+        nix_value(value)
+
+
+@needs_nix
+@pytest.mark.parametrize("value", INTEGRAL_FLOATS)
+def test_integral_float_renders_as_a_nix_float(tmp_path: Path, value: float) -> None:
+    model = _FloatModel(
+        x=value,
+        xs=[value, 2.5],
+        obj={
+            "plain": value,
+            "list": [value],
+            "nested": {"deep": value},
+            "prio": {"$priority": "force", "value": value},
+            "dflt": {"$priority": "default", "value": [value]},
+            "ovr": {"$priority": 50, "value": value},
+        },
+    )
+    rendered = _render_floats(
+        tmp_path,
+        "{\n"
+        "  top = {{ x | nix }};\n"
+        "  inlist = {{ xs | nix }};\n"
+        "  item = {{ xs[0] | nix }};\n"
+        "  inobj = {{ obj | nix }};\n"
+        "  key = {{ obj.plain | nix }};\n"
+        "  prio = {{ obj.prio | nix }};\n"
+        "  looped = [ {% for v in xs %}({{ v | nix }}) {% endfor %}];\n"
+        "}\n",
+        model,
+    )
+    types = nix_types(rendered)
+    assert types["top"] == "float"
+    assert types["inlist"] == ["float", "float"]
+    assert types["item"] == "float"
+    assert types["inobj"] == {
+        "plain": "float",
+        "list": ["float"],
+        "nested": {"deep": "float"},
+        "prio": "float",
+        "dflt": ["float"],
+        "ovr": "float",
+    }
+    assert types["key"] == "float"
+    assert types["prio"] == "float"
+    assert types["looped"] == ["float", "float"]
+    # The value itself survives, too.
+    assert nix_eval(f"let {LIB_STUB} in {rendered}")["top"] == value
+
+
+@needs_nix
+def test_non_integral_floats_and_ints_keep_their_types(tmp_path: Path) -> None:
+    class M(BaseModel):
+        f: float
+        i: int
+        items: list[Any]
+
+    model = M(f=2.5, i=7, items=[1.5, 3, -0.25, True, "s"])
+    rendered = _render_floats(
+        tmp_path,
+        "{ f = {{ f | nix }}; i = {{ i | nix }}; items = {{ items | nix }}; }\n",
+        model,
+    )
+    assert nix_types(rendered) == {
+        "f": "float",
+        "i": "int",
+        "items": ["float", "int", "float", "bool", "string"],
+    }
+
+
+def test_integral_float_is_unchanged_for_other_languages(tmp_path: Path) -> None:
+    class M(BaseModel):
+        x: float
+
+    template_file = tmp_path / "t.j2"
+    template_file.write_text("x = {{ x }}\n", encoding="utf-8")
+    rendered = render_template(template_file, M(x=7.0), "toml")
+    assert "$float" not in rendered
 
 
 @needs_nix
