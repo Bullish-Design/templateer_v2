@@ -56,7 +56,7 @@ pinned nixpkgs with no other module. The overlay `overlays.default` adds `templa
 `minijinja` to the Python package set. nixpkgs has no `minijinja`, so the flake builds it.
 
 ```nix
-inputs.templateer.url = "github:Bullish-Design/templateer_v2/v0.4.2";
+inputs.templateer.url = "github:Bullish-Design/templateer_v2/v0.5.0";
 ```
 
 Run `nix build .#templateer` to build it. The build runs the test suite and `templateer --help`.
