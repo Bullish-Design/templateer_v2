@@ -647,6 +647,40 @@ def test_nix_filter_rejects_bad_values(value: Any) -> None:
         nix_value(value)
 
 
+class _AnyModel(BaseModel):
+    cfg: dict[str, Any]
+
+
+def test_dollar_nix_is_raw_nix_source() -> None:
+    """Pin the documented risk: `$nix` text is not escaped or checked."""
+    assert nix_value({"$nix": "a"}) == "(a)"
+    assert nix_value({"$nix": "1); evil = (2"}) == "(1); evil = (2)"
+    assert nix_value({"$nix": '"unterminated'}) == '("unterminated)'
+
+
+@needs_nix
+def test_dollar_nix_from_model_data_injects_nix(tmp_path: Path) -> None:
+    """A model-controlled `dict[str, Any]` field can add a key through `$nix`."""
+    hostile = _AnyModel(cfg={"$nix": "1); evil = (2"})
+    rendered = _render_floats(tmp_path, "{ a = {{ cfg | nix }}; }", hostile)
+    assert nix_eval(rendered) == {"a": 1, "evil": 2}  # an extra attribute appeared
+    safe = _AnyModel(cfg={"k": "1); evil = (2"})
+    rendered = _render_floats(tmp_path, "{ a = {{ cfg | nix }}; }", safe)
+    assert nix_eval(rendered) == {"a": {"k": "1); evil = (2"}}  # plain data stays data
+
+
+def test_integer_beyond_64_bits_reaches_the_filter_as_a_float(tmp_path: Path) -> None:
+    """MiniJinja converts an out-of-range int before the filter runs (a known limit)."""
+
+    class M(BaseModel):
+        n: int
+
+    rendered = _render_floats(tmp_path, "{{ n | nix }}", M(n=2**70))
+    assert rendered == "1.1805916207174113e+21"
+    with pytest.raises(EscapeError):
+        nix_value(2**70)  # a direct call still refuses it
+
+
 def test_plain_object_with_dollar_key_is_not_a_tag() -> None:
     assert nix_value({"$other": 1}) == '{ "$other" = 1; }'
 

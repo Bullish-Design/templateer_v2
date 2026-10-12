@@ -269,9 +269,17 @@ Drafts of the pin changes are in `evidence/consumer-drafts/`:
 
 Rollback: each consumer restores its previous pin and lock.
 
-## Step 10 — `0.6.0`: `nix` language fixes (D3)
+## Step 10 — `0.6.0`: `nix` language fixes (D3) — fixes landed on `main`, no version bump
 
 Use one workspace per fix. Order by risk: float tag, `$output: "out"`,
 `nix_nullable`, denormal guard, `$nix` documentation. REPORT.md Q5 gives the
 design and the tests. Each fix needs a negative test. Coordinate with devenv-py:
 its `{"$nix": "null"}` and `$output` workarounds change meaning.
+
+Result (2026-10-12): the five fixes are on `main`. No version bump and no tag;
+the owner decides the `0.6.0` tag. The float fix routes `| nix` through
+`| tojson | nix_json`, because MiniJinja 2.22.0, 2.24.0, and 3.0.0 all pass
+`7.0` to a Python filter as the int `7`. `$output: "out"` renders `.out` now.
+`nix_nullable` renders `None` as `null`. A subnormal float raises. The README
+states that `$nix` is raw Nix. devenv-py must drop its `{"$nix": "null"}` and
+`$output` workarounds when it moves to these fixes.

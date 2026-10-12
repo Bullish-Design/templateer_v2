@@ -384,18 +384,27 @@ for an optional field. `nix` stays strict and refuses `None`.
 
 `None` under `nix`, NaN, infinity, a non-zero float below
 `2.2250738585072014e-308` (Nix refuses its literal), an integer beyond 64 bits,
-U+0000, and a lone surrogate raise `EscapeError`. The parse check needs `nix-instantiate` on `PATH`. A
+U+0000, and a lone surrogate raise `EscapeError`. (An integer beyond 64 bits
+reaches a template filter as a float; see Known limits.) The parse check needs `nix-instantiate` on `PATH`. A
 missing program is an error, not a pass. `--parse` also binds names, so the
 module head must declare `pkgs` and `lib`. `templateer check` renders each
 fixture and parses it. It reports "nothing audited" when no fixture exists.
 
+#### Raw Nix with `$nix`
+
+`{"$nix": "src"}` writes `src` as raw Nix source in parentheses. The filter does
+not escape it and does not check it. Never put model-controlled text in `$nix`.
+The text `1); evil = (2` adds an `evil` attribute to the output. A
+`dict[str, Any]` field that the model fills can carry such an object. Use a
+typed field and a plain string, number, list, or `$pkg` object for model data.
+Send `$nix` only from template code or from trusted input.
+
 #### Known limits
 
-Release 0.5.0 has these limits. Release 0.6.0 plans fixes for them.
-
-- **`$nix` text.** The filter inserts `$nix` text as raw Nix in parentheses.
-  Never let the model control that text. A `dict[str, Any]` field that the
-  model fills can inject Nix through `$nix`.
+- **`$nix` text.** See above. The parentheses around the text are cosmetic.
+- **Large integers.** MiniJinja converts an integer beyond 64 bits to a float
+  before a filter runs. `{{ n | nix }}` then writes a float, not an error. Bound
+  an integer field with `ge` and `le`.
 
 ### Renderer authoring rule
 
