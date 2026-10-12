@@ -207,7 +207,7 @@ FILTER_CASES: list[tuple[str, Any, str]] = [
     ("object-key-escaped", {'k"${x}': 1}, '{ "k\\"\\${x}" = 1; }'),
     ("nested", {"a": [{"b": 1}]}, '{ "a" = [ { "b" = 1; } ]; }'),
     ("pkg", {"$pkg": "a.b"}, "pkgs.a.b"),
-    ("pkg-out", {"$pkg": "a.b", "$output": "out"}, "pkgs.a.b"),
+    ("pkg-out", {"$pkg": "a.b", "$output": "out"}, "pkgs.a.b.out"),
     ("pkg-output-null", {"$pkg": "a", "$output": None}, "pkgs.a"),
     ("pkg-bin", {"$pkg": "a.b", "$output": "bin"}, "pkgs.a.b.bin"),
     ("pkg-quoted-segment", {"$pkg": "a.2048"}, 'pkgs.a."2048"'),
@@ -526,6 +526,26 @@ def test_pkg_with_output_selects_the_attribute() -> None:
         + nix_value({"$pkg": "a.b", "$output": "bin"})
     )
     assert nix_eval(source) == 7
+
+
+@needs_nix
+def test_pkg_out_output_selects_the_out_attribute() -> None:
+    """`curl.out` and `curl` are different store paths, so `out` must stay."""
+    source = "let pkgs = { a = { out = 1; bin = 2; }; }; in " + nix_value(
+        {"$pkg": "a", "$output": "out"}
+    )
+    assert nix_eval(source) == 1
+
+
+@pytest.mark.parametrize("output", ["", 0, 1, True, ["out"], {"out": 1}])
+def test_pkg_output_must_be_a_non_empty_string(output: Any) -> None:
+    with pytest.raises(EscapeError, match=r"\$output"):
+        nix_value({"$pkg": "a", "$output": output})
+
+
+def test_pkg_without_output_adds_nothing() -> None:
+    assert nix_value({"$pkg": "curl"}) == "pkgs.curl"
+    assert nix_value({"$pkg": "curl", "$output": None}) == "pkgs.curl"
 
 
 @needs_nix

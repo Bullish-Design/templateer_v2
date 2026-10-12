@@ -129,7 +129,7 @@ def _render_pkg(obj: dict[str, Any]) -> str:
     if not all(parts):
         raise EscapeError(f"$pkg {attr!r} has an empty path segment")
     output = obj.get("$output")
-    if output is not None and output != "out":
+    if output is not None:
         if not isinstance(output, str) or not output:
             raise EscapeError("$output must be a non-empty string")
         parts.append(output)

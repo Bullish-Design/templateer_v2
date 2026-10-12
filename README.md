@@ -357,7 +357,7 @@ The `nix` filter renders a JSON value as a Nix expression:
 | integer, float, boolean | the literal (a negative number in a list gets parentheses) |
 | list | `[ a b ]` |
 | object | `{ "key" = value; }` with every key quoted |
-| `{"$pkg": "a.b", "$output": "bin"}` | `pkgs.a.b.bin` (no output, or `out`, adds nothing) |
+| `{"$pkg": "a.b", "$output": "bin"}` | `pkgs.a.b.bin` (no `$output`, or `null`, adds nothing; `"out"` adds `.out`) |
 | `{"$path": "./x"}` | `./x` (relative paths only) |
 | `{"$nix": "src"}` | `(src)` (raw Nix; the caller owns its content) |
 | `{"$priority": "default"\|"force"\|n, "value": v}` | `lib.mkDefault v`, `lib.mkForce v`, `lib.mkOverride n v` |
@@ -384,11 +384,6 @@ Release 0.5.0 has these limits. Release 0.6.0 plans fixes for them.
 
 - **`null`.** The `nix` filter refuses `None`. Guard the field with
   `{% if field %}`. Or send `{"$nix": "null"}` as the value.
-- **`$output: "out"`.** The filter drops this key, so `pkgs.x.out` renders as
-  `pkgs.x`. For a package whose first output is not `out`, such as `curl` or
-  `openssl`, the two names differ. The only workaround is to send
-  `{"$nix": "pkgs.x.out"}`. The filter inserts `$nix` text as raw Nix, so keep
-  that text out of model control.
 - **`$nix` text.** The filter inserts `$nix` text as raw Nix in parentheses.
   Never let the model control that text. A `dict[str, Any]` field that the
   model fills can inject Nix through `$nix`.
