@@ -72,3 +72,5 @@ enforces the CLI behavior.
 
 The user directed this run to ignore Allium. No Allium specification changed.
 The behavioral specification updates remain open for a separate run.
+
+Update (2026-10-12): the release-prep docs commit changed `OutputSpec.language` in `.scratch/specs/allium/templates.allium` to the closed language set. All other specification updates remain open.

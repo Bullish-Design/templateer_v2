@@ -40,10 +40,13 @@ external entity RequesterSession {
 
 value OutputSpec {
     path: String
-    language: String
+    language: toml | json | yaml | python | nix | markdown | text
 }
 -- What artifact a template generates: the target file path and the
--- target language (toml, json, yaml, python, ...).
+-- target language. The set is closed (models.py, Language):
+-- structured (toml, json, yaml, python), parsed (nix) and
+-- unstructured (markdown, text). An unknown language fails at
+-- template load.
 
 value OutputValidator {
     kind: parse | command

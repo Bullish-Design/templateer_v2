@@ -371,6 +371,29 @@ missing program is an error, not a pass. `--parse` also binds names, so the
 module head must declare `pkgs` and `lib`. `templateer check` renders each
 fixture and parses it. It reports "nothing audited" when no fixture exists.
 
+#### Known limits
+
+Release 0.5.0 has these limits. Release 0.6.0 plans fixes for them.
+
+- **`null`.** The `nix` filter refuses `None`. Guard the field with
+  `{% if field %}`. Or send `{"$nix": "null"}` as the value.
+- **`$output: "out"`.** The filter drops this key, so `pkgs.x.out` renders as
+  `pkgs.x`. For a package whose first output is not `out`, such as `curl` or
+  `openssl`, the two names differ. The only workaround is to send
+  `{"$nix": "pkgs.x.out"}`. The filter inserts `$nix` text as raw Nix, so keep
+  that text out of model control.
+- **`$nix` text.** The filter inserts `$nix` text as raw Nix in parentheses.
+  Never let the model control that text. A `dict[str, Any]` field that the
+  model fills can inject Nix through `$nix`.
+- **Integral floats.** A float with an integer value, such as `7.0` or `0.0`,
+  reaches the template as a tag object. A comparison or a truth test gives a
+  wrong result with no error: `x > 1` is true and `{% if x %}` is true for
+  `0.0`. Arithmetic fails: `x + 1` raises a render error. Use only
+  `{{ x | nix }}` on a float field.
+- **Very small floats.** A float with a magnitude below
+  `2.2250738585072014e-308` renders text that Nix rejects. The parse check
+  reports it.
+
 ### Renderer authoring rule
 
 Put each string interpolation inside double quotes in a structured-language

@@ -26,6 +26,7 @@ templateer/
 │   ├── audit.py                # Authoring lint and injection audit
 │   ├── catalog.py              # Template discovery, lookup, and load errors
 │   ├── cli.py                  # Click command-line interface
+│   ├── constants.py            # Default model identifier; imports without the generation stack
 │   ├── escaping.py             # Language-aware interpolation escaping
 │   ├── generator.py            # Pydantic AI generation and prompt context
 │   ├── models.py               # Template metadata and validator models

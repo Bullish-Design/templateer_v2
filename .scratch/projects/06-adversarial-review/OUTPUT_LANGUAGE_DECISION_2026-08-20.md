@@ -1,3 +1,8 @@
+> **Superseded (2026-10-12).** The `nix` language is now in `main`, added in
+> `d3304db4` and `ac02b48c`. The line "Do not add Nix" below no longer holds.
+> The text below is the original decision. See
+> `.scratch/projects/08-release-and-consumers/REPORT.md`.
+
 # Output language decision — 2026-08-20
 
 ## Decision
