@@ -2,8 +2,10 @@
 
 The ``nix`` language does not escape at the finalizer.  The finalizer passes
 strings unchanged, so every ``{{ }}`` site in a ``nix`` template must pass its
-value through the ``nix`` filter (or ``nix_attr`` for an attribute-path
-segment).  The source lint in ``templateer.audit`` enforces that rule.
+value through the ``nix`` filter, the ``nix_nullable`` filter, or ``nix_attr``
+for an attribute-path segment.  The source lint in ``templateer.audit``
+enforces that rule.  ``nix`` refuses ``None``.  ``nix_nullable`` renders it as
+``null``.
 
 The value grammar is plain JSON plus five tagged objects:
 
@@ -45,7 +47,7 @@ import json
 import math
 import re
 from collections.abc import Callable
-from typing import Any
+from typing import Any, cast
 
 from templateer.escaping import EscapeError, escape_nix_string
 
@@ -159,13 +161,13 @@ def _render_nix(obj: dict[str, Any]) -> str:
     return f"({source})"
 
 
-def _render_priority(obj: dict[str, Any], atom: bool) -> str:
+def _render_priority(obj: dict[str, Any], atom: bool, allow_null: bool = False) -> str:
     if set(obj) != _PRIORITY_KEYS:
         raise EscapeError(
             "$priority object needs exactly the keys '$priority' and 'value'"
         )
     priority = obj["$priority"]
-    value = _render(obj["value"], atom=True)
+    value = _render(obj["value"], atom=True, allow_null=allow_null)
     if priority == "default":
         text = f"lib.mkDefault {value}"
     elif priority == "force":
@@ -188,10 +190,12 @@ _TAGS: dict[str, Callable[..., str]] = {
 }
 
 
-def _render(value: object, atom: bool) -> str:
+def _render(value: object, atom: bool, allow_null: bool = False) -> str:
     # bool before int: bool is a subclass of int in Python.
     if isinstance(value, bool):
         return "true" if value else "false"
+    if value is None and allow_null:
+        return "null"
     if value is None:
         raise EscapeError(
             "null value passed to the nix filter; guard the field with "
@@ -206,10 +210,13 @@ def _render(value: object, atom: bool) -> str:
     if isinstance(value, (list, tuple)):
         if not value:
             return "[ ]"
-        return "[ " + " ".join(_render(item, atom=True) for item in value) + " ]"
+        items = (_render(item, atom=True, allow_null=allow_null) for item in value)
+        return "[ " + " ".join(items) + " ]"
     if isinstance(value, dict):
         for tag, render_tag in _TAGS.items():
             if tag in value:
+                if tag == "$priority":
+                    return _render_priority(cast("dict[str, Any]", value), atom, allow_null)
                 return render_tag(value, atom)
         if not value:
             return "{ }"
@@ -217,7 +224,8 @@ def _render(value: object, atom: bool) -> str:
         for key, item in value.items():
             if not isinstance(key, str):
                 raise EscapeError(f"object key {key!r} is not a string")
-            pairs.append(f'"{escape_nix_string(key)}" = {_render(item, atom=False)};')
+            text = _render(item, atom=False, allow_null=allow_null)
+            pairs.append(f'"{escape_nix_string(key)}" = {text};')
         return "{ " + " ".join(pairs) + " }"
     raise EscapeError(f"cannot render a {type(value).__name__} value as Nix")
 
@@ -233,6 +241,26 @@ def nix_value(value: object) -> str:
     return _render(value, atom=False)
 
 
+def nix_nullable(value: object) -> str:
+    """Like :func:`nix_value`, but ``None`` renders as ``null`` at any depth.
+
+    This includes a ``None`` inside a list, an object, or a ``$priority`` value.
+    The strict :func:`nix_value` still refuses ``None``.
+    """
+    return _render(value, atom=False, allow_null=True)
+
+
+def _parse_json(text: object, filter_name: str) -> object:
+    if not isinstance(text, str):
+        raise EscapeError(
+            f"{filter_name} needs the text from tojson, got {type(text).__name__}"
+        )
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError as e:
+        raise EscapeError(f"{filter_name}: the text is not JSON: {e}") from None
+
+
 def nix_json(text: object) -> str:
     """Render a JSON text (the output of ``| tojson``) as a Nix expression.
 
@@ -240,22 +268,22 @@ def nix_json(text: object) -> str:
         EscapeError: *text* is not a string, is not JSON, or holds a value that
             :func:`nix_value` refuses.
     """
-    if not isinstance(text, str):
-        raise EscapeError(f"nix_json needs the text from tojson, got {type(text).__name__}")
-    try:
-        value = json.loads(text)
-    except json.JSONDecodeError as e:
-        raise EscapeError(f"nix_json: the text is not JSON: {e}") from None
-    return nix_value(value)
+    return nix_value(_parse_json(text, "nix_json"))
+
+
+def nix_json_nullable(text: object) -> str:
+    """Like :func:`nix_json`, but ``null`` renders as ``null`` (see :func:`nix_nullable`)."""
+    return nix_nullable(_parse_json(text, "nix_json_nullable"))
 
 
 _SITE = re.compile(r"\{\{.*?\}\}", re.DOTALL)
 _MASK = re.compile(r"\{#.*?#\}|\{%-?\s*raw\s*-?%\}.*?\{%-?\s*endraw\s*-?%\}", re.DOTALL)
-_NIX_FILTER = re.compile(r"\|\s*nix(?!\w)")
+_NIX_FILTER = re.compile(r"\|\s*(nix|nix_nullable)(?!\w)")
+_JSON_FILTER = {"nix": "nix_json", "nix_nullable": "nix_json_nullable"}
 
 
 def _rewrite_site(inner: str) -> str:
-    """Replace each top-level ``| nix`` in one site by ``| tojson | nix_json``."""
+    """Route each top-level ``| nix`` (or ``| nix_nullable``) in one site through JSON."""
     out: list[str] = []
     quote = ""
     escaped = False
@@ -279,7 +307,7 @@ def _rewrite_site(inner: str) -> str:
         elif char == "|" and depth == 0 and inner[index + 1 : index + 2] != "|":
             found = _NIX_FILTER.match(inner, index)
             if found:
-                out.append("| tojson | nix_json")
+                out.append(f"| tojson | {_JSON_FILTER[found.group(1)]}")
                 index = found.end()
                 continue
         out.append(char)
@@ -290,9 +318,12 @@ def _rewrite_site(inner: str) -> str:
 def route_nix_through_json(source: str) -> str:
     """Rewrite ``| nix`` to ``| tojson | nix_json`` in every ``{{ }}`` site.
 
+    ``| nix_nullable`` becomes ``| tojson | nix_json_nullable``.
+
     Comments, ``{% raw %}`` blocks, string literals, and other filters (such as
     ``nix_attr``) stay unchanged.  The audit lint reads the original source,
-    so the template author never writes ``nix_json``.
+    so the template author never writes ``nix_json``
+    or ``nix_json_nullable``.
     """
     masked = _MASK.sub(lambda m: re.sub(r"[^\n]", " ", m.group()), source)
     pieces: list[str] = []

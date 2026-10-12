@@ -30,6 +30,8 @@ from templateer.nix_render import (
     nix_attr,
     nix_attr_path,
     nix_json,
+    nix_json_nullable,
+    nix_nullable,
     nix_value,
     route_nix_through_json,
 )
@@ -672,6 +674,110 @@ def _render(tmp_path: Path, source: str, model: BaseModel) -> str:
     return render_template(template_file, model, "nix")
 
 
+class _NullModel(BaseModel):
+    s: str | None = None
+    xs: list[float | None] = [1.0, None]
+    obj: dict[str, Any] = {"a": None, "b": [None, 7.0]}
+    f: float | None = 7.0
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        (None, "null"),
+        ([None, 1], "[ null 1 ]"),
+        ({"a": None}, '{ "a" = null; }'),
+        ({"a": [{"b": None}]}, '{ "a" = [ { "b" = null; } ]; }'),
+        ({"$priority": "default", "value": None}, "lib.mkDefault null"),
+        ([{"$priority": "force", "value": None}], "[ (lib.mkForce null) ]"),
+        ({"$priority": 50, "value": [None]}, "lib.mkOverride 50 [ null ]"),
+        ("a\"${b}", '"a\\"\\${b}"'),
+        ([-1, 2.5], "[ (-1) 2.5 ]"),
+    ],
+)
+def test_nix_nullable_renders_null_at_any_depth(value: Any, expected: str) -> None:
+    assert nix_nullable(value) == expected
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        None,
+        [None],
+        {"a": None},
+        {"$priority": "default", "value": None},
+        [{"$priority": "force", "value": None}],
+    ],
+)
+def test_nix_stays_strict_about_null(value: Any) -> None:
+    with pytest.raises(EscapeError, match="null"):
+        nix_value(value)
+
+
+@pytest.mark.parametrize(
+    "value",
+    [float("nan"), float("inf"), 2**63, {"$pkg": ""}, {"$priority": "bad", "value": None}],
+)
+def test_nix_nullable_keeps_the_other_refusals(value: Any) -> None:
+    with pytest.raises(EscapeError):
+        nix_nullable(value)
+
+
+def test_nix_json_nullable_accepts_null_and_nix_json_does_not() -> None:
+    assert nix_json_nullable('{"a":[null,7.0]}') == '{ "a" = [ null 7.0 ]; }'
+    with pytest.raises(EscapeError):
+        nix_json('{"a":[null,7.0]}')
+    with pytest.raises(EscapeError):
+        nix_json_nullable("not json")
+
+
+def test_nix_nullable_in_a_template_keeps_floats(tmp_path: Path) -> None:
+    rendered = _render_floats(
+        tmp_path,
+        "{ s = {{ s | nix_nullable }}; xs = {{ xs | nix_nullable }}; "
+        "o = {{ obj | nix_nullable }}; f = {{ f | nix_nullable }}; "
+        "g = {{ (f + 1) | nix_nullable }}; }",
+        _NullModel(),
+    )
+    assert rendered == (
+        '{ s = null; xs = [ 1.0 null ]; o = { "a" = null; "b" = [ null 7.0 ]; }; '
+        "f = 7.0; g = 8.0; }"
+    )
+
+
+def test_nix_in_a_template_still_refuses_null(tmp_path: Path) -> None:
+    for site in ("s", "xs", "obj"):
+        with pytest.raises(RenderError, match="null"):
+            _render_floats(tmp_path, f"{{{{ {site} | nix }}}}", _NullModel())
+
+
+def test_nix_nullable_is_unavailable_to_other_languages(tmp_path: Path) -> None:
+    template_file = tmp_path / "t.j2"
+    template_file.write_text("{{ s | nix_nullable }}", encoding="utf-8")
+    with pytest.raises(RenderError):
+        render_template(template_file, _NullModel(), "toml")
+
+
+@pytest.mark.parametrize("value", [float("inf"), float("-inf"), float("nan")])
+def test_non_finite_float_is_refused_not_rendered_as_null(tmp_path: Path, value: float) -> None:
+    class M(BaseModel):
+        x: float
+        other: list[float] = []
+
+    with pytest.raises(RenderError, match="no literal"):
+        _render_floats(tmp_path, "{{ x | nix_nullable }}", M(x=value))
+    with pytest.raises(RenderError, match="no literal"):
+        _render_floats(tmp_path, "{{ other | nix_nullable }}", M(x=1.0, other=[value]))
+
+
+@needs_nix
+def test_nix_nullable_output_evaluates() -> None:
+    source = "let lib = { mkDefault = x: x; }; in " + nix_nullable(
+        {"a": None, "b": [None], "c": {"$priority": "default", "value": None}}
+    )
+    assert nix_eval(source) == {"a": None, "b": [None], "c": None}
+
+
 def test_filter_is_available_only_for_nix(tmp_path: Path) -> None:
     template_file = tmp_path / "t.j2"
     template_file.write_text("{{ name | nix }}\n", encoding="utf-8")
@@ -831,6 +937,8 @@ def _template(
         "{{x|nix}}",
         "{{- x | nix -}}",
         "{{ x | nix_attr }}",
+        "{{ x | nix_nullable }}",
+        "{{ items | nix_nullable | indent(2) }}",
         "{{ 'if' | nix_attr }}",
         "{{ items | nix | indent(2) }}",
         "{{ x | default('a') | nix }}",
@@ -855,6 +963,9 @@ def test_lint_accepts_filtered_sites(make_template: Callable[..., Path], site: s
         ("{{ x | nix | upper }}", "last filter is 'upper'"),
         ("{{ x | nix | safe }}", "last filter is 'safe'"),
         ("{{ x | tojson }}", "last filter is 'tojson'"),
+        ("{{ x | nix_nullable | upper }}", "last filter is 'upper'"),
+        ("{{ 'a' ~ x | nix_nullable }}", "binds looser than a filter"),
+        ("{{ x | nix_json }}", "last filter is 'nix_json'"),
         ("{{ x | escape }}", "last filter is 'escape'"),
         ("{{ 'a' ~ x | nix }}", "binds looser than a filter"),
         ("{{ x if items else 'b' | nix }}", "binds looser than a filter"),

@@ -30,7 +30,7 @@ templateer/
 │   ├── escaping.py             # Language-aware interpolation escaping
 │   ├── generator.py            # Pydantic AI generation and prompt context
 │   ├── models.py               # Template metadata and validator models
-│   ├── nix_render.py           # The nix and nix_attr template filters
+│   ├── nix_render.py           # The nix, nix_nullable, and nix_attr template filters
 │   ├── pipeline.py             # Generation, rendering, validation, and retries
 │   ├── py.typed                # PEP 561 typing marker
 │   ├── renderer.py             # MiniJinja rendering

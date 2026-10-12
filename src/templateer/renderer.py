@@ -6,6 +6,7 @@ Two invariants, both enforced here and nowhere else:
      template formats through its `nix` filter instead of the finalizer.
 """
 
+import math
 from pathlib import Path
 
 from minijinja import Environment
@@ -15,6 +16,8 @@ from templateer.escaping import make_finalizer
 from templateer.nix_render import (
     nix_attr_path,
     nix_json,
+    nix_json_nullable,
+    nix_nullable,
     nix_value,
     route_nix_through_json,
 )
@@ -22,6 +25,18 @@ from templateer.nix_render import (
 
 class RenderError(Exception):
     """Raised when template rendering fails."""
+
+
+def _reject_non_finite(value: object) -> None:
+    """Raise RenderError when *value* holds NaN or infinity at any depth."""
+    if isinstance(value, float) and not math.isfinite(value):
+        raise RenderError(f"Nix has no literal for the float {value!r}")
+    if isinstance(value, dict):
+        for item in value.values():
+            _reject_non_finite(item)
+    elif isinstance(value, (list, tuple)):
+        for item in value:
+            _reject_non_finite(item)
 
 
 def render_template(template_path: Path, model: BaseModel, language: str) -> str:
@@ -43,6 +58,8 @@ def render_template(template_path: Path, model: BaseModel, language: str) -> str
     render_context = model.model_dump(mode="json")
     source = template_path.read_text(encoding="utf-8")
     if language == "nix":
+        # `tojson` writes `null` for NaN and infinity, which would hide them.
+        _reject_non_finite(render_context)
         # MiniJinja turns an integral float into an int when it calls a Python
         # filter.  `tojson` keeps the float, so `nix` runs on the JSON text.
         source = route_nix_through_json(source)
@@ -57,7 +74,9 @@ def render_template(template_path: Path, model: BaseModel, language: str) -> str
         # the quoting.  The audit lint requires one on every `{{ }}` site.
         env.add_filter("nix", nix_value)
         env.add_filter("nix_attr", nix_attr_path)
+        env.add_filter("nix_nullable", nix_nullable)
         env.add_filter("nix_json", nix_json)
+        env.add_filter("nix_json_nullable", nix_json_nullable)
 
     try:
         return env.render_str(source, **render_context)

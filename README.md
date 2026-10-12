@@ -337,7 +337,8 @@ Pydantic schema and one schema-valid example when one is available.
 ### The `nix` language
 
 A `nix` template gets no escaping from the finalizer. Every `{{ }}` site must
-end with the `nix` filter, or with `nix_attr` for an attribute-path segment.
+end with the `nix` filter, the `nix_nullable` filter, or `nix_attr` for an
+attribute-path segment.
 The source lint reports any other site. `{% raw %}` blocks and comments are not
 linted.
 
@@ -369,11 +370,20 @@ A float field keeps its type. `{{ x | nix }}` writes `7.0` for `7.0`. A
 comparison, a truth test, and arithmetic on a float field work as for any
 number: `x > 1`, `{% if x %}`, and `(x + 1) | nix`. Before it renders, the
 renderer rewrites each top-level `| nix` in a `{{ }}` site to
-`| tojson | nix_json`. The rewrite skips comments, `{% raw %}` blocks, string
-literals, and `nix_attr`. Write `| nix` only. Do not write `nix_json`.
+`| tojson | nix_json`, and `| nix_nullable` to `| tojson | nix_json_nullable`.
+The rewrite skips comments, `{% raw %}` blocks, string literals, and
+`nix_attr`. Write `| nix` or `| nix_nullable`. Do not write `nix_json`.
 
-`null`, NaN, infinity, an integer beyond 64 bits, U+0000, and a lone surrogate
-raise `EscapeError`. The parse check needs `nix-instantiate` on `PATH`. A
+`nix_nullable` works like `nix`, but it renders `None` as `null` at any depth.
+That includes a `None` inside a list, an object, or a `$priority` value. Use it
+for an optional field. `nix` stays strict and refuses `None`.
+
+```jinja
+  description = {{ description | nix_nullable }};
+```
+
+`None` under `nix`, NaN, infinity, an integer beyond 64 bits, U+0000, and a
+lone surrogate raise `EscapeError`. The parse check needs `nix-instantiate` on `PATH`. A
 missing program is an error, not a pass. `--parse` also binds names, so the
 module head must declare `pkgs` and `lib`. `templateer check` renders each
 fixture and parses it. It reports "nothing audited" when no fixture exists.
@@ -382,8 +392,6 @@ fixture and parses it. It reports "nothing audited" when no fixture exists.
 
 Release 0.5.0 has these limits. Release 0.6.0 plans fixes for them.
 
-- **`null`.** The `nix` filter refuses `None`. Guard the field with
-  `{% if field %}`. Or send `{"$nix": "null"}` as the value.
 - **`$nix` text.** The filter inserts `$nix` text as raw Nix in parentheses.
   Never let the model control that text. A `dict[str, Any]` field that the
   model fills can inject Nix through `$nix`.

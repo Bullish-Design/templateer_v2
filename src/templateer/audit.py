@@ -552,9 +552,10 @@ def _site_verdict(
 
 # A `nix` template gets no finalizer escaping, so a `{{ }}` site that skips the
 # `nix` filter writes raw text into Nix source.  The rule: the last filter of
-# every site is `nix` (any value) or `nix_attr` (an attribute-path segment).
-# `indent` may follow, because it only moves whitespace.
-_NIX_FILTERS = frozenset({"nix", "nix_attr"})
+# every site is `nix` (any value), `nix_nullable` (any value, `None` allowed), or
+# `nix_attr` (an attribute-path segment).  `indent` may follow, because it only
+# moves whitespace.
+_NIX_FILTERS = frozenset({"nix", "nix_nullable", "nix_attr"})
 _NIX_TRAILING_FILTERS = frozenset({"indent"})
 
 _INTERPOLATION = re.compile(r"\{\{.*?\}\}", re.DOTALL)
@@ -644,7 +645,7 @@ def _nix_site_verdict(expression: str) -> str | None:
     if names[-1] not in _NIX_FILTERS:
         return (
             f"the last filter is '{names[-1]}'; the site must end with "
-            f"'nix' (or 'nix_attr' for an attribute-path segment)"
+            f"'nix' or 'nix_nullable' (or 'nix_attr' for an attribute-path segment)"
         )
     return None
 
