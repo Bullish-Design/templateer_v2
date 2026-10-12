@@ -1,8 +1,8 @@
 # 08 — Plan to a tagged `v0.5.0` on `main`
 
 **Status (2026-10-12):** steps 1-10 are done. `0.5.0` and `0.6.0` are
-released and tagged. The consumers moved to `0.6.0`. Three consumer items stay
-open; step 9 lists them.
+released and tagged. The consumers moved to `0.6.0`. One host item stays open;
+step 9 lists it.
 
 Evidence for each claim is in `REPORT.md`.
 Results for steps 1-5 are in `evidence/release-prep-results.txt`.
@@ -248,7 +248,7 @@ project venv prints `0.5.0` after `uv sync`.
 
 Rollback: `jj new 70f13f57` restores the old view for path consumers.
 
-## Step 9 — Consumer pin updates — DONE (at `0.6.0`), three items open
+## Step 9 — Consumer pin updates — DONE (at `0.6.0`), one item open
 
 Each consumer owns its change. Run its own gate after each one.
 
@@ -273,21 +273,26 @@ Result (2026-10-12): the consumers moved to `0.6.0`, not `0.5.0`, and pushed.
 
 | Consumer | Change |
 |---|---|
-| devenv-py | `9391161b`: pin to `0.6.0` and the RT2 corruption test fix. Then `235a6507`: the writer uses `nix_nullable`. The `{"$nix": "null"}` workaround is gone. |
-| copyroom | `f9eb44fc`: `templateer==0.6.0`, the flake input, and `packages/templateer.nix`. The agent checked the hash with `nix-prefetch-url`. |
+| devenv-py | `9391161b`: pin to `0.6.0` and the RT2 corruption test fix. Then `235a6507`: the writer uses `nix_nullable`. The `{"$nix": "null"}` workaround is gone. Then `6ab4f8f4`: the copyroom flake pin moves from `v0.8.1` to `v0.8.6`. |
+| copyroom | `f9eb44fc`: `templateer==0.6.0`, the flake input, and `packages/templateer.nix`. The agent checked the hash with `nix-prefetch-url`. Then `0874d2dc` and `56b71fce`: release `0.8.6`, see the follow-up below. |
 | argentic | `5273aebd`: lock. |
 | devman-spike | `86fa98a0`: lock. |
-| vendomat | `9d9108cb`: a dated note. |
+| vendomat | `9d9108cb`: a dated note. Then `58fa9a84`: the default `VENDOMAT_TEMPLATEER` path points at the live devenv environment. |
 
-Open items (2026-10-12). Each is still open:
+Follow-up (2026-10-12). The copyroom flake pin in devenv-py could not move to
+`v0.8.5`. The CopyRoom `0.8.5` package runs its test suite in the Nix sandbox,
+and one test failed there: `jj git push` refuses a commit with no author, and
+the sandbox had no jj identity. CopyRoom `0.8.6` sets `JJ_USER` and `JJ_EMAIL` in
+`preInstallCheck`. The package check then passes (314 passed, 5 skipped).
+Tag `v0.8.6` is an annotated tag at `56b71fce`. `0.8.6` carries
+`templateer==0.6.0`.
 
-- devenv-py's copyroom flake pin was at `v0.8.1`, which carries templateer
-  `0.4.2`. Another change moves it to `v0.8.5`.
-- vendomat's default `VENDOMAT_TEMPLATEER` path pointed at a stale `.venv`
-  (`0.2.0`). Another change fixes it.
+Open item (2026-10-12):
+
 - The `nix-meta` and `nix-meta-channel4` lock files pin an old locked vendomat
   revision that carries templateer `v0.4.1`. This is a host change. It is not
-  done.
+  done. The current vendomat `flake.nix` has no templateer input, so a refresh
+  of the vendomat input would likely drop it.
 
 Rollback: each consumer restores its previous pin and lock.
 
