@@ -365,6 +365,13 @@ The `nix` filter renders a JSON value as a Nix expression:
 `nix_attr` takes one string, or a list of strings that it joins with dots. It
 writes a bare identifier when it can, and a quoted name otherwise.
 
+A float field keeps its type. `{{ x | nix }}` writes `7.0` for `7.0`. A
+comparison, a truth test, and arithmetic on a float field work as for any
+number: `x > 1`, `{% if x %}`, and `(x + 1) | nix`. Before it renders, the
+renderer rewrites each top-level `| nix` in a `{{ }}` site to
+`| tojson | nix_json`. The rewrite skips comments, `{% raw %}` blocks, string
+literals, and `nix_attr`. Write `| nix` only. Do not write `nix_json`.
+
 `null`, NaN, infinity, an integer beyond 64 bits, U+0000, and a lone surrogate
 raise `EscapeError`. The parse check needs `nix-instantiate` on `PATH`. A
 missing program is an error, not a pass. `--parse` also binds names, so the
@@ -385,11 +392,6 @@ Release 0.5.0 has these limits. Release 0.6.0 plans fixes for them.
 - **`$nix` text.** The filter inserts `$nix` text as raw Nix in parentheses.
   Never let the model control that text. A `dict[str, Any]` field that the
   model fills can inject Nix through `$nix`.
-- **Integral floats.** A float with an integer value, such as `7.0` or `0.0`,
-  reaches the template as a tag object. A comparison or a truth test gives a
-  wrong result with no error: `x > 1` is true and `{% if x %}` is true for
-  `0.0`. Arithmetic fails: `x + 1` raises a render error. Use only
-  `{{ x | nix }}` on a float field.
 - **Very small floats.** A float with a magnitude below
   `2.2250738585072014e-308` renders text that Nix rejects. The parse check
   reports it.

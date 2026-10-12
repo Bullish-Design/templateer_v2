@@ -12,7 +12,12 @@ from minijinja import Environment
 from pydantic import BaseModel
 
 from templateer.escaping import make_finalizer
-from templateer.nix_render import nix_attr_path, nix_value, tag_integral_floats
+from templateer.nix_render import (
+    nix_attr_path,
+    nix_json,
+    nix_value,
+    route_nix_through_json,
+)
 
 
 class RenderError(Exception):
@@ -36,11 +41,11 @@ def render_template(template_path: Path, model: BaseModel, language: str) -> str
         raise RenderError(f"Template file not found: {template_path}")
 
     render_context = model.model_dump(mode="json")
-    if language == "nix":
-        # MiniJinja turns an integral float into an int, and Nix then reads an
-        # int.  Tag each one so the `nix` filter can still write a float.
-        render_context = tag_integral_floats(render_context)
     source = template_path.read_text(encoding="utf-8")
+    if language == "nix":
+        # MiniJinja turns an integral float into an int when it calls a Python
+        # filter.  `tojson` keeps the float, so `nix` runs on the JSON text.
+        source = route_nix_through_json(source)
 
     env = Environment()
     env.trim_blocks = True
@@ -52,6 +57,7 @@ def render_template(template_path: Path, model: BaseModel, language: str) -> str
         # the quoting.  The audit lint requires one on every `{{ }}` site.
         env.add_filter("nix", nix_value)
         env.add_filter("nix_attr", nix_attr_path)
+        env.add_filter("nix_json", nix_json)
 
     try:
         return env.render_str(source, **render_context)

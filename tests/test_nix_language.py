@@ -26,7 +26,13 @@ from templateer.escaping import (
     make_finalizer,
 )
 from templateer.models import FullFileOutput, OutputSpec, ParseValidator
-from templateer.nix_render import nix_attr, nix_attr_path, nix_value, tag_integral_floats
+from templateer.nix_render import (
+    nix_attr,
+    nix_attr_path,
+    nix_json,
+    nix_value,
+    route_nix_through_json,
+)
 from templateer.renderer import RenderError, render_template
 from templateer.template import Template
 from templateer.validators import STRUCTURED_LANGUAGES, validate_output
@@ -307,18 +313,95 @@ def _render_floats(tmp_path: Path, template: str, model: BaseModel) -> str:
     return render_template(template_file, model, "nix")
 
 
-def test_tag_integral_floats_tags_only_integral_floats() -> None:
-    data = {"a": 7.0, "b": [0.0, 2.5, 3, True, "s", None], "c": {"d": -125000.0}}
-    assert tag_integral_floats(data) == {
-        "a": {"$float": "7.0"},
-        "b": [{"$float": "0.0"}, 2.5, 3, True, "s", None],
-        "c": {"d": {"$float": "-125000.0"}},
-    }
+class _XModel(BaseModel):
+    x: float
+    s: str = "text"
 
 
-def test_tag_integral_floats_leaves_non_finite_floats() -> None:
-    inf = float("inf")
-    assert tag_integral_floats([inf]) == [inf]
+@pytest.mark.parametrize("value", [0.0, 7.0, 7.5])
+def test_float_field_compares_and_branches_as_a_number(tmp_path: Path, value: float) -> None:
+    template = (
+        "{{ (x > 1) | nix }} {{ (x == 7) | nix }} "
+        "{% if x %}T{% else %}F{% endif %} {{ (x + 1) | nix }} {{ (x * 2) | nix }}"
+    )
+    rendered = _render_floats(tmp_path, template, _XModel(x=value))
+    expected = {
+        0.0: "false false F 1.0 0.0",
+        7.0: "true true T 8.0 14.0",
+        7.5: "true false T 8.5 15.0",
+    }[value]
+    assert rendered == expected
+
+
+@pytest.mark.parametrize(("value", "text"), [(0.0, "0.0"), (7.0, "7.0"), (7.5, "7.5")])
+def test_float_field_still_renders_as_a_float(tmp_path: Path, value: float, text: str) -> None:
+    assert _render_floats(tmp_path, "{{ x | nix }}", _XModel(x=value)) == text
+
+
+def test_nix_json_renders_json_text() -> None:
+    assert nix_json("7.0") == "7.0"
+    assert nix_json('{"a":[1,2.0,"s"]}') == '{ "a" = [ 1 2.0 "s" ]; }'
+    assert nix_json('{"$pkg":"curl","$output":"bin"}') == "pkgs.curl.bin"
+
+
+@pytest.mark.parametrize("bad", ["not json", "", "{", 7, None, b"1"])
+def test_nix_json_rejects_text_that_is_not_json(bad: Any) -> None:
+    with pytest.raises(EscapeError):
+        nix_json(bad)
+
+
+def test_nix_json_still_refuses_what_the_nix_filter_refuses() -> None:
+    for text in ("null", "[null]", '{"$pkg":""}', str(2**63)):
+        with pytest.raises(EscapeError):
+            nix_json(text)
+
+
+def test_route_rewrites_a_top_level_nix_filter() -> None:
+    assert route_nix_through_json("{{ x | nix }}") == "{{ x | tojson | nix_json }}"
+    assert route_nix_through_json("{{ (x + 1)|nix }}") == "{{ (x + 1)| tojson | nix_json }}"
+    assert (
+        route_nix_through_json("{{- x | nix | indent(2) -}}")
+        == "{{- x | tojson | nix_json | indent(2) -}}"
+    )
+
+
+def test_route_leaves_other_text_alone() -> None:
+    source = (
+        '{{ "a | nix" | nix }} {# {{ x | nix }} #} {% raw %}{{ x | nix }}{% endraw %}\n'
+        "{{ k | nix_attr }} {{ f(x | nix) }} {% if x | nix %}{% endif %} | nix"
+    )
+    assert route_nix_through_json(source) == (
+        '{{ "a | nix" | tojson | nix_json }} {# {{ x | nix }} #} '
+        "{% raw %}{{ x | nix }}{% endraw %}\n"
+        "{{ k | nix_attr }} {{ f(x | nix) }} {% if x | nix %}{% endif %} | nix"
+    )
+
+
+def test_string_data_that_looks_like_template_text_stays_data(tmp_path: Path) -> None:
+    hostile = "{{ x | nix }} | nix {% raw %} ${y} {# c #}"
+    rendered = _render_floats(tmp_path, "{{ s | nix }}", _XModel(x=1.0, s=hostile))
+    assert rendered == '"{{ x | nix }} | nix {% raw %} \\${y} {# c #}"'
+
+
+def test_nix_json_is_unavailable_to_other_languages(tmp_path: Path) -> None:
+    template_file = tmp_path / "t.j2"
+    template_file.write_text("{{ x | nix_json }}", encoding="utf-8")
+    with pytest.raises(RenderError):
+        render_template(template_file, _XModel(x=1.0), "toml")
+
+
+def test_nix_filter_still_refuses_null_through_a_template(tmp_path: Path) -> None:
+    class M(BaseModel):
+        s: str | None = None
+
+    with pytest.raises(RenderError, match="null value"):
+        _render_floats(tmp_path, "{{ s | nix }}", M())
+
+
+@needs_nix
+def test_float_arithmetic_result_is_a_nix_float(tmp_path: Path) -> None:
+    rendered = _render_floats(tmp_path, "builtins.typeOf {{ (x + 1) | nix }}", _XModel(x=7.0))
+    assert nix_eval(rendered) == "float"
 
 
 @pytest.mark.parametrize(

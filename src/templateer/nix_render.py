@@ -28,16 +28,20 @@ priority call in an atom position gets parentheses, because ``[ -1 ]`` and
 ``[ lib.mkForce 1 ]`` do not parse as one element.  ``$nix`` is raw Nix source
 by design: the caller owns its content.
 
-``$float`` is internal.  MiniJinja turns a float with an integer value (``7.0``)
-into an int when a template reads it as a scalar, and Nix then reads ``7``.  The
-renderer calls :func:`tag_integral_floats` for ``nix`` templates.  That function
-replaces each such float with ``{"$float": repr(value)}``, and the ``nix`` filter
-renders the tag as a Nix float.  A template that compares or does arithmetic on
-an integral float sees the tag object, not a number.
+``$float`` writes a Nix float from text.  A caller can send it in model data.
+
+MiniJinja turns a float with an integer value (``7.0``) into an int when it
+hands the value to a Python filter, and Nix then reads ``7``.  The renderer
+avoids this.  Before it renders a ``nix`` template, it rewrites each top-level
+``| nix`` in a ``{{ }}`` site to ``| tojson | nix_json``.  ``tojson`` runs inside
+MiniJinja and keeps ``7.0``.  :func:`nix_json` parses that text and calls
+:func:`nix_value`.  The template context keeps its real floats, so comparison,
+truth tests, and arithmetic on a float field work.
 """
 
 from __future__ import annotations
 
+import json
 import math
 import re
 from collections.abc import Callable
@@ -218,22 +222,6 @@ def _render(value: object, atom: bool) -> str:
     raise EscapeError(f"cannot render a {type(value).__name__} value as Nix")
 
 
-def tag_integral_floats(value: Any) -> Any:
-    """Return *value* with each integral float replaced by a ``$float`` tag.
-
-    MiniJinja turns ``7.0`` into the int ``7`` when a template reads it as a
-    scalar.  The tag keeps the float type until the ``nix`` filter runs.  Other
-    values, including non-integral and non-finite floats, pass through.
-    """
-    if isinstance(value, float) and math.isfinite(value) and value.is_integer():
-        return {"$float": repr(value)}
-    if isinstance(value, dict):
-        return {key: tag_integral_floats(item) for key, item in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [tag_integral_floats(item) for item in value]
-    return value
-
-
 def nix_value(value: object) -> str:
     """Render a tagged JSON value as a Nix expression.
 
@@ -243,3 +231,75 @@ def nix_value(value: object) -> str:
             that Nix cannot carry.
     """
     return _render(value, atom=False)
+
+
+def nix_json(text: object) -> str:
+    """Render a JSON text (the output of ``| tojson``) as a Nix expression.
+
+    Raises:
+        EscapeError: *text* is not a string, is not JSON, or holds a value that
+            :func:`nix_value` refuses.
+    """
+    if not isinstance(text, str):
+        raise EscapeError(f"nix_json needs the text from tojson, got {type(text).__name__}")
+    try:
+        value = json.loads(text)
+    except json.JSONDecodeError as e:
+        raise EscapeError(f"nix_json: the text is not JSON: {e}") from None
+    return nix_value(value)
+
+
+_SITE = re.compile(r"\{\{.*?\}\}", re.DOTALL)
+_MASK = re.compile(r"\{#.*?#\}|\{%-?\s*raw\s*-?%\}.*?\{%-?\s*endraw\s*-?%\}", re.DOTALL)
+_NIX_FILTER = re.compile(r"\|\s*nix(?!\w)")
+
+
+def _rewrite_site(inner: str) -> str:
+    """Replace each top-level ``| nix`` in one site by ``| tojson | nix_json``."""
+    out: list[str] = []
+    quote = ""
+    escaped = False
+    depth = 0
+    index = 0
+    while index < len(inner):
+        char = inner[index]
+        if quote:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == quote:
+                quote = ""
+        elif char in "\"'":
+            quote = char
+        elif char in "([{":
+            depth += 1
+        elif char in ")]}":
+            depth -= 1
+        elif char == "|" and depth == 0 and inner[index + 1 : index + 2] != "|":
+            found = _NIX_FILTER.match(inner, index)
+            if found:
+                out.append("| tojson | nix_json")
+                index = found.end()
+                continue
+        out.append(char)
+        index += 1
+    return "".join(out)
+
+
+def route_nix_through_json(source: str) -> str:
+    """Rewrite ``| nix`` to ``| tojson | nix_json`` in every ``{{ }}`` site.
+
+    Comments, ``{% raw %}`` blocks, string literals, and other filters (such as
+    ``nix_attr``) stay unchanged.  The audit lint reads the original source,
+    so the template author never writes ``nix_json``.
+    """
+    masked = _MASK.sub(lambda m: re.sub(r"[^\n]", " ", m.group()), source)
+    pieces: list[str] = []
+    last = 0
+    for site in _SITE.finditer(masked):
+        pieces.append(source[last : site.start()])
+        pieces.append("{{" + _rewrite_site(source[site.start() + 2 : site.end() - 2]) + "}}")
+        last = site.end()
+    pieces.append(source[last:])
+    return "".join(pieces)
