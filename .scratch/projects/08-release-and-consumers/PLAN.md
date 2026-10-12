@@ -1,9 +1,10 @@
 # 08 — Plan to a tagged `v0.5.0` on `main`
 
-**Status (2026-10-12):** steps 1-8 are done. Step 9 (consumer updates) is in
-progress; other agents run it. Step 10 is in progress.
+**Status (2026-10-12):** steps 1-10 are done. `0.5.0` and `0.6.0` are
+released and tagged. The consumers moved to `0.6.0`. Three consumer items stay
+open; step 9 lists them.
 
-Steps 6-10 are still a proposal. Evidence for each claim is in `REPORT.md`.
+Evidence for each claim is in `REPORT.md`.
 Results for steps 1-5 are in `evidence/release-prep-results.txt`.
 
 Goal: one tag on `main` that every consumer can pin. The tag holds the `nix`
@@ -11,17 +12,18 @@ language, the flake, and a Testee gate.
 
 ## Decided
 
-The owner decided D1-D6 on 2026-10-12. One approval is still open.
+The owner decided D1-D6 on 2026-10-12. D1-D5 are done. D6 is done, except
+the `v6-flake` tag, which this plan does not record as removed.
 
 | Id | Question | Decision |
 |---|---|---|
-| D1 | Version: `0.5.0` or `0.4.3`? | `0.5.0`. The `nix` language widens a closed set. |
+| D1 | Version: `0.5.0` or `0.4.3`? | `0.5.0`. The `nix` language widens a closed set. Done: `v0.5.0` is tagged. |
 | D2 | Land the flake as a copy of `a342d1e4` on `main`, or as a merge commit? | Copy it (`jj duplicate`). Do not merge. |
-| D3 | Fix the `nix` gaps in `0.5.0`, or ship `0.5.0` first? | Ship `0.5.0` first with documented limits. Fix the gaps in `0.6.0`. |
-| D4 | Adopt Testee 0.6.1 before the tag? | Yes, before the tag. |
-| D5 | Move the default working copy to `main` after the tag? | Yes, after the tag. Tell the path consumers' owners first. |
-| D6 | Cleanup: dead remote bookmark, `v6-flake`, four old empty workspaces? | Delete `038-devman-migration@origin`. Keep `v6-flake` until copyroom moves off `v0.4.2`. Forget the four old empty workspaces. |
-| Push | Explicit go for the pushes in steps 6, 7, and 8 | **Open.** No push runs until the owner says go. |
+| D3 | Fix the `nix` gaps in `0.5.0`, or ship `0.5.0` first? | Ship `0.5.0` first with documented limits. Fix the gaps in `0.6.0`. Done: `v0.6.0` is tagged (step 10). |
+| D4 | Adopt Testee 0.6.1 before the tag? | Yes, before the tag. Done (step 3). |
+| D5 | Move the default working copy to `main` after the tag? | Yes, after the tag. Tell the path consumers' owners first. Done (step 8). |
+| D6 | Cleanup: dead remote bookmark, `v6-flake`, four old empty workspaces? | Delete `038-devman-migration@origin`. Keep `v6-flake` until copyroom moves off `v0.4.2`. Forget the four old empty workspaces. Done (step 8) for the bookmark and the workspaces. This plan records no change to `v6-flake`. Copyroom has moved off `v0.4.2` (step 9). |
+| Push | Explicit go for the pushes in steps 6, 7, and 8 | Done. The three pushes ran on 2026-10-12. |
 
 ## Stack after steps 1-5
 
@@ -246,7 +248,7 @@ project venv prints `0.5.0` after `uv sync`.
 
 Rollback: `jj new 70f13f57` restores the old view for path consumers.
 
-## Step 9 — Consumer pin updates — IN PROGRESS
+## Step 9 — Consumer pin updates — DONE (at `0.6.0`), three items open
 
 Each consumer owns its change. Run its own gate after each one.
 
@@ -267,19 +269,60 @@ Drafts of the pin changes are in `evidence/consumer-drafts/`:
 `relock-notes.txt`. The dry run (REPORT addendum) shows the same results on
 `0.5.0` as on the current pins for all four consumers.
 
+Result (2026-10-12): the consumers moved to `0.6.0`, not `0.5.0`, and pushed.
+
+| Consumer | Change |
+|---|---|
+| devenv-py | `9391161b`: pin to `0.6.0` and the RT2 corruption test fix. Then `235a6507`: the writer uses `nix_nullable`. The `{"$nix": "null"}` workaround is gone. |
+| copyroom | `f9eb44fc`: `templateer==0.6.0`, the flake input, and `packages/templateer.nix`. The agent checked the hash with `nix-prefetch-url`. |
+| argentic | `5273aebd`: lock. |
+| devman-spike | `86fa98a0`: lock. |
+| vendomat | `9d9108cb`: a dated note. |
+
+Open items (2026-10-12). Each is still open:
+
+- devenv-py's copyroom flake pin was at `v0.8.1`, which carries templateer
+  `0.4.2`. Another change moves it to `v0.8.5`.
+- vendomat's default `VENDOMAT_TEMPLATEER` path pointed at a stale `.venv`
+  (`0.2.0`). Another change fixes it.
+- The `nix-meta` and `nix-meta-channel4` lock files pin an old locked vendomat
+  revision that carries templateer `v0.4.1`. This is a host change. It is not
+  done.
+
 Rollback: each consumer restores its previous pin and lock.
 
-## Step 10 — `0.6.0`: `nix` language fixes (D3) — fixes landed on `main`, no version bump
+## Step 10 — `0.6.0`: `nix` language fixes (D3) — DONE
 
 Use one workspace per fix. Order by risk: float tag, `$output: "out"`,
 `nix_nullable`, denormal guard, `$nix` documentation. REPORT.md Q5 gives the
 design and the tests. Each fix needs a negative test. Coordinate with devenv-py:
 its `{"$nix": "null"}` and `$output` workarounds change meaning.
 
-Result (2026-10-12): the five fixes are on `main`. No version bump and no tag;
-the owner decides the `0.6.0` tag. The float fix routes `| nix` through
+Result (2026-10-12): the five fixes are on `main`. At that point there was no
+version bump and no tag. The float fix routes `| nix` through
 `| tojson | nix_json`, because MiniJinja 2.22.0, 2.24.0, and 3.0.0 all pass
 `7.0` to a Python filter as the int `7`. `$output: "out"` renders `.out` now.
 `nix_nullable` renders `None` as `null`. A subnormal float raises. The README
 states that `$nix` is raw Nix. devenv-py must drop its `{"$nix": "null"}` and
 `$output` workarounds when it moves to these fixes.
+
+Release result (2026-10-12): `0.6.0` is released. Tag `v0.6.0` is a lightweight
+tag at `a6d609d5b662d79a8f2512772e23ec32129c59ec`. The tag is pushed to
+origin. `main` holds the release commit "chore: release 0.6.0" at that commit.
+The version is `0.6.0` in `pyproject.toml` and `uv.lock`. No GitHub Release
+object exists for any tag. Tags are the release mechanism.
+
+Content of `0.6.0`, all in the `nix` language:
+
+- Floats keep their type. The renderer rewrites `| nix` to
+  `| tojson | nix_json` before the render.
+- `$output: "out"` renders `.out`.
+- The `nix_nullable` filter renders `None` as `null`.
+- The filter refuses subnormal floats.
+- The renderer refuses NaN, infinity, and an integer beyond 64 bits
+  (`|n| > 2^63-1`) before the render. MiniJinja converts such an integer to a
+  float before a filter runs.
+- The README states that `$nix` is raw Nix and lists the known limits.
+
+The five fixes took the suite from 676 to 750 passed (9 skipped). The
+large-integer refusal added more tests. The consumer moves are in step 9.
