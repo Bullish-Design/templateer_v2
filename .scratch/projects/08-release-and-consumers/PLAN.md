@@ -1,8 +1,7 @@
 # 08 — Plan to a tagged `v0.5.0` on `main`
 
-**Prep status (2026-10-12):** steps 1-5 are done locally. The next action is
-step 6 (land and push `main`). It needs the owner's explicit go. Steps 7 and 8
-also push, so each needs a go.
+**Status (2026-10-12):** steps 1-8 are done. Step 9 (consumer updates) is in
+progress; other agents run it. Step 10 is in progress.
 
 Steps 6-10 are still a proposal. Evidence for each claim is in `REPORT.md`.
 Results for steps 1-5 are in `evidence/release-prep-results.txt`.
@@ -175,7 +174,7 @@ nix build .#templateer && ./result/bin/templateer --version   # expect 0.5.0
 
 Rollback: `jj abandon V`.
 
-## Step 6 — Land and push `main` (needs push approval)
+## Step 6 — Land and push `main` — DONE
 
 ```bash
 cd $W && jj bookmark set main -r lsrkxkxx   # V, the version commit, not the empty @
@@ -190,10 +189,12 @@ commands, and `testee status`. `testee verify` has no `--full` flag.
 
 Verify: `jj log -r 'main@origin'` = `V`. The hook allowed the push.
 
+Result (2026-10-12): `main` is pushed at `55af56f91ecf`.
+
 Rollback before push: `jj bookmark set main -r ac02b48c --allow-backwards`.
 After push: do not rewrite `main`. Revert with a new commit.
 
-## Step 7 — Tag and push the tag (needs push approval)
+## Step 7 — Tag and push the tag — DONE
 
 ```bash
 jj tag set v0.5.0 -r main
@@ -204,6 +205,11 @@ git ls-remote --tags origin | grep v0.5.0  # read-only check
 Older tags `v0.2.0`–`v0.4.1` are annotated. `jj tag set` makes a lightweight
 tag, like `v0.4.2`. Both work for `?ref=refs/tags/...` and uv `tag =`.
 
+Result (2026-10-12): tag `v0.5.0` is pushed at `55af56f91ecf`. The tag builds
+from GitHub and prints `0.5.0`. The `narHash` is
+`sha256-JgJQ9zSwvuTJ7disfUQtDpvgmcRctgBNflvQ0NZ1oAY=`. The uv source
+`tag = "v0.5.0"` resolves.
+
 Verify from a clean place:
 
 ```bash
@@ -212,7 +218,7 @@ nix build --out-link /tmp/templateer-tag-check 'git+https://github.com/Bullish-D
 
 Rollback: never move a pushed tag. Fix forward with `v0.5.1`.
 
-## Step 8 — Main checkout and cleanup (D5, D6)
+## Step 8 — Main checkout and cleanup (D5, D6) — DONE
 
 ```bash
 cd $R && jj new main                       # default working copy is empty today
@@ -228,12 +234,19 @@ The workspaces `inv08-docs` and `rel-050-docs` are already gone. This
 investigation's change (`txtnyrvw`) is the first commit of the stack, so step 6
 lands it.
 
+Result (2026-10-12): the default checkout moved to `main`, and its venv reports
+`0.5.0`. The five workspaces are forgotten. The Testee push hook blocked the
+deletion of `038-devman-migration`, because the old commit (`6cfdd6df`) has no
+`devenv.lock`. The owner approved a bypass of the gate for that one deletion.
+The agent deleted the branch with `gh api -X DELETE` on 2026-10-12. The hook
+reads `TESTEE_GATE` only from the Claude Code process.
+
 Verify: `jj workspace list` shows only `default`. `templateer --version` in the
 project venv prints `0.5.0` after `uv sync`.
 
 Rollback: `jj new 70f13f57` restores the old view for path consumers.
 
-## Step 9 — Consumer pin updates
+## Step 9 — Consumer pin updates — IN PROGRESS
 
 Each consumer owns its change. Run its own gate after each one.
 
