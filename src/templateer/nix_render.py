@@ -52,7 +52,7 @@ from typing import Any, cast
 
 from templateer.escaping import EscapeError, escape_nix_string
 
-_MAX_INT = 2**63 - 1  # Nix cannot write -2**63 as a literal.
+MAX_INT = 2**63 - 1  # Nix cannot write -2**63 as a literal.
 
 # Nix refuses the literal of a non-zero float below the smallest normal double.
 _MIN_NORMAL_FLOAT = sys.float_info.min  # 2.2250738585072014e-308
@@ -96,7 +96,7 @@ def nix_attr_path(value: object) -> str:
 
 
 def _int_literal(value: int, atom: bool) -> str:
-    if abs(value) > _MAX_INT:
+    if abs(value) > MAX_INT:
         raise EscapeError(f"integer {value} is outside the Nix 64-bit literal range")
     return f"({value})" if value < 0 and atom else str(value)
 

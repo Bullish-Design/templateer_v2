@@ -669,16 +669,39 @@ def test_dollar_nix_from_model_data_injects_nix(tmp_path: Path) -> None:
     assert nix_eval(rendered) == {"a": {"k": "1); evil = (2"}}  # plain data stays data
 
 
-def test_integer_beyond_64_bits_reaches_the_filter_as_a_float(tmp_path: Path) -> None:
-    """MiniJinja converts an out-of-range int before the filter runs (a known limit)."""
+@pytest.mark.parametrize("value", [2**63, -(2**63), 2**70, -(2**100)])
+def test_integer_beyond_64_bits_is_refused_before_the_render(tmp_path: Path, value: int) -> None:
+    """MiniJinja converts an out-of-range int before a filter runs, so the renderer refuses it."""
 
     class M(BaseModel):
         n: int
+        ns: list[int] = []
+        obj: dict[str, Any] = {}
 
-    rendered = _render_floats(tmp_path, "{{ n | nix }}", M(n=2**70))
-    assert rendered == "1.1805916207174113e+21"
+    with pytest.raises(RenderError, match="64-bit"):
+        _render_floats(tmp_path, "{{ n | nix }}", M(n=value))
+    with pytest.raises(RenderError, match="64-bit"):
+        _render_floats(tmp_path, "{{ ns | nix }}", M(n=1, ns=[value]))
+    with pytest.raises(RenderError, match="64-bit"):
+        _render_floats(tmp_path, "{{ obj | nix }}", M(n=1, obj={"a": [{"b": value}]}))
     with pytest.raises(EscapeError):
-        nix_value(2**70)  # a direct call still refuses it
+        nix_value(value)  # a direct call still refuses it
+
+
+def test_integer_at_the_64_bit_limit_still_renders(tmp_path: Path) -> None:
+    class M(BaseModel):
+        n: int
+
+    assert _render_floats(tmp_path, "{{ n | nix }}", M(n=2**63 - 1)) == str(2**63 - 1)
+
+
+def test_large_integer_is_not_refused_outside_nix(tmp_path: Path) -> None:
+    class M(BaseModel):
+        n: int
+
+    template_file = tmp_path / "t.j2"
+    template_file.write_text("n = {{ n }}\n", encoding="utf-8")
+    render_template(template_file, M(n=2**70), "toml")
 
 
 def test_plain_object_with_dollar_key_is_not_a_tag() -> None:

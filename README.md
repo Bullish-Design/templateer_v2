@@ -384,8 +384,9 @@ for an optional field. `nix` stays strict and refuses `None`.
 
 `None` under `nix`, NaN, infinity, a non-zero float below
 `2.2250738585072014e-308` (Nix refuses its literal), an integer beyond 64 bits,
-U+0000, and a lone surrogate raise `EscapeError`. (An integer beyond 64 bits
-reaches a template filter as a float; see Known limits.) The parse check needs `nix-instantiate` on `PATH`. A
+U+0000, and a lone surrogate raise `EscapeError`. A NaN, an infinity, or an
+integer beyond 64 bits anywhere in the model data fails the render with a
+`RenderError`, before the filter runs. The parse check needs `nix-instantiate` on `PATH`. A
 missing program is an error, not a pass. `--parse` also binds names, so the
 module head must declare `pkgs` and `lib`. `templateer check` renders each
 fixture and parses it. It reports "nothing audited" when no fixture exists.
@@ -403,8 +404,8 @@ Send `$nix` only from template code or from trusted input.
 
 - **`$nix` text.** See above. The parentheses around the text are cosmetic.
 - **Large integers.** MiniJinja converts an integer beyond 64 bits to a float
-  before a filter runs. `{{ n | nix }}` then writes a float, not an error. Bound
-  an integer field with `ge` and `le`.
+  before a filter runs. The renderer refuses such an integer in the model data
+  first. Bound an integer field with `ge` and `le` to catch it at validation.
 
 ### Renderer authoring rule
 
