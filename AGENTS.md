@@ -16,25 +16,33 @@ or pass template paths with `-p` or `TemplateRegistry.from_paths()`.
 
 ## Working here
 
-Enter the pinned environment before you run a project command:
+Verify through Testee. Run it from the repository root. Do not wrap it in
+`devenv shell`:
 
 ```bash
-devenv shell
+testee verify
+testee status -r REV
 ```
 
-The current shell does not provide `testee` or `gitman`. Use direct verification
-and Git commands when those managers are unavailable. Report the fallback.
+`testee verify` runs `ruff check src/ tests/ templates/`, `ty check src/`, and
+`pytest -q` in a clean workspace. Run `testee status -r REV` on the exact
+revision before you integrate. A push through the devman hook needs exit 0.
+The checks live in `devenv.nix` as `testee.checks`. The host profile provides
+`testee` (0.6.1 or newer) and `gitman`. Check `testee --version` first: a
+devenv shell can put an older `testee` ahead of the host one on `PATH`.
 
-Run the pull-request gate:
+For a quick edit loop, run the tools through `uv run` in the pinned environment.
+`uv run` uses the venv of the current checkout, even when another checkout's
+`bin` directory is on `PATH`:
 
 ```bash
-pytest -q
-ruff check src/ tests/ templates/
-ty check src/
+devenv shell -- uv run --extra dev pytest -q
+devenv shell -- uv run --extra dev ruff check src/ tests/ templates/
+devenv shell -- uv run --extra dev ty check src/
 ```
 
-All three commands must pass before a commit. Run focused tests before the full
-gate when you change one behavior.
+All three must pass before a commit. Run focused tests before the full gate
+when you change one behavior.
 
 Use Pydantic AI test models in automated tests. Do not require a provider key
 for the default suite.

@@ -8,7 +8,6 @@ __pycache__/
 .direnv/**
 #.tmuxp.yaml
 .python-version
-devenv.lock
 .devenv.flake.nix
 .agents/pi/**
 .pi/**
