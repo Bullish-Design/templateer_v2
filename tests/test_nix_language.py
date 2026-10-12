@@ -278,6 +278,53 @@ def test_unparenthesised_negative_would_not_parse() -> None:
     assert parse_errors("[ -1 ]") != []
 
 
+SMALLEST_NORMAL = 2.2250738585072014e-308
+
+
+@pytest.mark.parametrize("value", [5e-324, 1e-310, -5e-324, -1e-310, SMALLEST_NORMAL / 2])
+def test_subnormal_float_is_refused(value: float) -> None:
+    for wrapped in (value, [value], {"k": value}, {"$float": repr(value)}):
+        with pytest.raises(EscapeError, match="subnormal"):
+            nix_value(wrapped)
+        with pytest.raises(EscapeError, match="subnormal"):
+            nix_nullable(wrapped)
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        (0.0, "0.0"),
+        (-0.0, "-0.0"),
+        (SMALLEST_NORMAL, "2.2250738585072014e-308"),
+        (-SMALLEST_NORMAL, "-2.2250738585072014e-308"),
+        (1e-300, "1.0e-300"),
+    ],
+)
+def test_zero_and_normal_floats_render(value: float, expected: str) -> None:
+    assert nix_value(value) == expected
+
+
+def test_subnormal_float_in_a_template_is_a_render_error(tmp_path: Path) -> None:
+    with pytest.raises(RenderError, match="subnormal"):
+        _render_floats(tmp_path, "{{ x | nix }}", _XModel(x=5e-324))
+
+
+@needs_nix
+def test_smallest_normal_float_parses_and_round_trips() -> None:
+    text = nix_value(SMALLEST_NORMAL)
+    assert text == "2.2250738585072014e-308"
+    assert parse_errors(text) == []
+    assert nix_eval(text) == SMALLEST_NORMAL
+    assert nix_eval(nix_value(-SMALLEST_NORMAL)) == -SMALLEST_NORMAL
+
+
+@needs_nix
+def test_nix_rejects_the_subnormal_literal_the_filter_refuses() -> None:
+    """Why the guard exists: `nix-instantiate` refuses these literals."""
+    for text in ("5.0e-324", "1.0e-310"):
+        assert parse_errors(text) != []
+
+
 @needs_nix
 def test_float_exponent_forms_evaluate() -> None:
     assert nix_eval(nix_value([1e20, 1.5e-07, 2.0, -0.5])) == [1e20, 1.5e-07, 2.0, -0.5]

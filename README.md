@@ -382,8 +382,9 @@ for an optional field. `nix` stays strict and refuses `None`.
   description = {{ description | nix_nullable }};
 ```
 
-`None` under `nix`, NaN, infinity, an integer beyond 64 bits, U+0000, and a
-lone surrogate raise `EscapeError`. The parse check needs `nix-instantiate` on `PATH`. A
+`None` under `nix`, NaN, infinity, a non-zero float below
+`2.2250738585072014e-308` (Nix refuses its literal), an integer beyond 64 bits,
+U+0000, and a lone surrogate raise `EscapeError`. The parse check needs `nix-instantiate` on `PATH`. A
 missing program is an error, not a pass. `--parse` also binds names, so the
 module head must declare `pkgs` and `lib`. `templateer check` renders each
 fixture and parses it. It reports "nothing audited" when no fixture exists.
@@ -395,9 +396,6 @@ Release 0.5.0 has these limits. Release 0.6.0 plans fixes for them.
 - **`$nix` text.** The filter inserts `$nix` text as raw Nix in parentheses.
   Never let the model control that text. A `dict[str, Any]` field that the
   model fills can inject Nix through `$nix`.
-- **Very small floats.** A float with a magnitude below
-  `2.2250738585072014e-308` renders text that Nix rejects. The parse check
-  reports it.
 
 ### Renderer authoring rule
 

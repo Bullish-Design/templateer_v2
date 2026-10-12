@@ -46,12 +46,16 @@ from __future__ import annotations
 import json
 import math
 import re
+import sys
 from collections.abc import Callable
 from typing import Any, cast
 
 from templateer.escaping import EscapeError, escape_nix_string
 
 _MAX_INT = 2**63 - 1  # Nix cannot write -2**63 as a literal.
+
+# Nix refuses the literal of a non-zero float below the smallest normal double.
+_MIN_NORMAL_FLOAT = sys.float_info.min  # 2.2250738585072014e-308
 
 _IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_'-]*\Z")
 
@@ -100,6 +104,8 @@ def _int_literal(value: int, atom: bool) -> str:
 def _float_literal(value: float, atom: bool) -> str:
     if not math.isfinite(value):
         raise EscapeError(f"float {value!r} has no Nix literal")
+    if value != 0.0 and abs(value) < _MIN_NORMAL_FLOAT:
+        raise EscapeError(f"float {value!r} is subnormal; Nix refuses its literal")
     text = repr(value)
     if "e" in text and "." not in text:
         # Nix floats need a decimal point before the exponent: 1e+20 is not one.
