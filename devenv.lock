@@ -1,22 +1,5 @@
 {
   "nodes": {
-    "allium-env": {
-      "flake": false,
-      "locked": {
-        "lastModified": 1780263979,
-        "narHash": "sha256-vdvui8+E/biQa4tWbLrku741+dkd8vIMjZPQQlu21Hw=",
-        "owner": "Bullish-Design",
-        "repo": "allium-env",
-        "rev": "c65350f4be83e805e868404b35310415bfbf9945",
-        "type": "github"
-      },
-      "original": {
-        "owner": "Bullish-Design",
-        "ref": "v0.3.5",
-        "repo": "allium-env",
-        "type": "github"
-      }
-    },
     "devenv": {
       "locked": {
         "dir": "src/modules",
@@ -140,29 +123,10 @@
     },
     "root": {
       "inputs": {
-        "allium-env": "allium-env",
         "devenv": "devenv",
         "mypy-agent": "mypy-agent",
         "nixpkgs": "nixpkgs",
-        "nixpkgs-python": "nixpkgs-python",
-        "testee": "testee"
-      }
-    },
-    "testee": {
-      "flake": false,
-      "locked": {
-        "lastModified": 1791735953,
-        "narHash": "sha256-C4Alij4BhHBXoEkCkfhfMkyiw6UqbFCKutkxKvJ08FY=",
-        "ref": "refs/tags/v0.6.1",
-        "rev": "b5ec947d6283f644edc1a29a2d9201294cf33db0",
-        "revCount": 82,
-        "type": "git",
-        "url": "https://github.com/Bullish-Design/testee"
-      },
-      "original": {
-        "ref": "refs/tags/v0.6.1",
-        "type": "git",
-        "url": "https://github.com/Bullish-Design/testee"
+        "nixpkgs-python": "nixpkgs-python"
       }
     }
   },

@@ -27,8 +27,8 @@ testee status -r REV
 `testee verify` runs `ruff check src/ tests/ templates/`, `ty check src/`, and
 `pytest -q` in a clean workspace. Run `testee status -r REV` on the exact
 revision before you integrate. A push through the devman hook needs exit 0.
-The checks live in `devenv.nix` as `testee.checks`. The host profile provides
-`testee` (0.6.1 or newer) and `gitman`. Check `testee --version` first: a
+The checks live in `nix/testee.nix`. The machine supplies the Testee module, the
+`testee` command (0.7.0 or newer), and `gitman`. Check `testee --version` first: a
 devenv shell can put an older `testee` ahead of the host one on `PATH`.
 
 For a quick edit loop, run the tools through `uv run` in the pinned environment.
