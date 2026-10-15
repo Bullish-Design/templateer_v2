@@ -1,4 +1,0 @@
-schema = 1
-project = "templateer_v2"
-groups = ["base"]
-policy = "stable"
